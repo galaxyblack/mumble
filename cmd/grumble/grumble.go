@@ -30,6 +30,7 @@ func main() {
 	// Open the data dir to check whether it exists.
 	dataDir, err := os.Open(Args.DataDir)
 	if err != nil {
+		// TODO: Perhaps just create the folder instead of erroring out?
 		log.Fatalf("Unable to open data directory: %v", err)
 		return
 	}
