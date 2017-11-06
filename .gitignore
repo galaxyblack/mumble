@@ -24,4 +24,5 @@ test.out
 goinstall.log
 *.sqlite
 build/
-src
+src/github.com
+src/golang.org

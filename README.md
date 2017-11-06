@@ -1,47 +1,16 @@
-
-Linux CI (Travis CI):
-
-[![Build Status](https://travis-ci.org/mumble-voip/grumble.svg?branch=master)](https://travis-ci.org/mumble-voip/grumble)
-
-Windows CI (AppVeyor):
-
-[![Build status](https://ci.appveyor.com/api/projects/status/yfvg0eagpuy9kgg9/branch/master?svg=true)](https://ci.appveyor.com/project/mumble-voip/grumble/branch/master)
-
-
-What is Grumble?
+What is Mumble?
 ================
 
-Grumble is an implementation of a server for the Mumble voice chat system. It is an alternative to Murmur, the typical Mumble server.
+Mumble is a fork of Grumble, and Grumble is an implementation of a server for the Mumble voice chat system. It is an alternative to Murmur, the typical Mumble server.
 
-Compiling Grumble from source
-=============================
-
-You must have a Go 1 environment installed to build Grumble. Those are available at:
-
-https://golang.org/dl/
-
-Once Go is installed, you should set up a GOPATH to avoid clobbering your Go environment's root directory with third party packages.
-
-Set up a GOPATH. On Unix, do something like this
-
-    $ export GOPATH=$HOME/gocode
-    $ mkdir -p $GOPATH
-
-and on Windows, do something like this (for cmd.exe):
-
-    c:\> set GOPATH=%USERPROFILE\gocode
-    c:\> mkdir %GOPATH%
-
-Then, it's time to install Grumble. The following line should do the trick:
-
-    $ go get mumble.info/grumble/cmd/grumble
-
-And that should be it. Grumble has been built, and is available in $GOPATH/bin as 'grumble'.
+Mumble takes a different design pattern, drops windows support and will be including a custom feature set implemented as plugins. The design will focus on library support and provide both client and server functionality.
 
 Project status
 ==============
 
-Grumble is pretty much feature complete, except for a few "minor" things.
+Grumble is pretty much feature complete, except for a few "minor" things. Mumble forked from Grumble after it already got feature complete, so mumble is essentially feature complete but is already receiving custom features that are not standard to the Mumble protocol, which is why a client is included in mumble to support abstracted/overlayed features that are being applied ontop of Mumble. 
+
+Mumble client/server combo will be security focused and provide terminal and web based client for prototyping and testing. And focus will be put on API support to allow controlling Mumble server from any language. 
 
 There is no bandwidth limiting, and there is no API to remote control it.
 
