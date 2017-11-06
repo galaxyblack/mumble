@@ -1,18 +1,24 @@
-// Copyright (c) 2010 The Grumble Authors
-// The use of this source code is goverened by a BSD-style
-// license that can be found in the LICENSE-file.
-
 package main
 
 import (
 	"flag"
+	"os"
+	"path/filepath"
+	"runtime"
+	"text/template"
 	"fmt"
 	"log"
-	"mumble.info/grumble/pkg/blobstore"
-	"mumble.info/grumble/pkg/logtarget"
 	"os"
 	"path/filepath"
 	"regexp"
+
+	"mumble/pkg/blobstore"
+	"mumble/pkg/logtarget"
+)
+
+var (
+	version   = "0.1.0"
+	buildDate = "n/a"
 )
 
 var servers map[int64]*Server
@@ -219,3 +225,47 @@ func main() {
 		select {}
 	}
 }
+
+import (
+)
+
+type UsageArgs struct {
+	Version   string
+	BuildDate string
+	OS        string
+	Arch      string
+}
+
+var usageTmpl = `usage: grumble [options]
+
+ grumble {{.Version}} ({{.BuildDate}})
+ target: {{.OS}}, {{.Arch}}
+
+ --help
+     Shows this help listing.
+
+ --datadir <data-dir> (default: $HOME/.grumble)
+     Directory to use for server storage.
+
+ --log <log-path> (default: $DATADIR/grumble.log)
+     Log file path.
+
+ --regen-keys
+     Force grumble to regenerate its global RSA
+     keypair (and certificate).
+
+     The global keypair lives in the root of the
+     grumble data directory.
+
+ --import-murmurdb <murmur-sqlite-path>
+     Import a Murmur SQLite database into grumble.
+
+     Use the --cleanup argument to force grumble to
+     clean up its data directory when doing the
+     import. This is *DESTRUCTIVE*! Use with care.
+`
+
+type args struct {
+	ShowHelp  bool
+	DataDir   string
+	LogPath   string
