@@ -49,6 +49,13 @@ func Filter(text string, options *Options) (filtered string, err error) {
 
 	if options.StripHTML {
 		// Does the message include HTML? If not, take the fast path.
+		// TODO: This is not a sufficent check for HTML, it is not even using reflect.DeepCompare, this could be easily circumvented, resulting
+		// in a massive XSS attack vector for all clients, but primarily HTML5 clients.
+		// It is better to just a community project instead of trying to reimplemnt this yourself, it wastes development time, makes the project
+		// needlessly complex, focuses developer time on rewriting existing code that is vetted by the community and has less bugs. This software
+		// as is  It should use a whitelist santization system and do deep comparison of all relevant symbols to actually find HTML tags and do full
+		// rebuilding of the tags with very restrictive limits on attributes and attribute values. Developers should focus on what makes this unique,
+		// existing libraries exist that implement this better with zero dependencies so there is no advantage here at all.
 		if strings.Index(text, "<") == -1 {
 			filtered = strings.TrimSpace(text)
 		} else {
