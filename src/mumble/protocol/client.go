@@ -334,8 +334,8 @@ func (client *Client) udpRecvLoop() {
 			var counter uint8
 			outbuf := make([]byte, 1024)
 
-			incoming := packetdata.New(buf[1 : 1+(len(buf)-1)])
-			outgoing := packetdata.New(outbuf[1 : 1+(len(outbuf)-1)])
+			incoming := NewPacket(buf[1 : 1+(len(buf)-1)])
+			outgoing := NewPacket(outbuf[1 : 1+(len(outbuf)-1)])
 			_ = incoming.GetUint32()
 
 			if kind != mumbleproto.UDPMessageVoiceOpus {
@@ -356,7 +356,7 @@ func (client *Client) udpRecvLoop() {
 			outbuf[0] = buf[0] & 0xe0 // strip target
 
 			if target != 0x1f { // VoiceTarget
-				client.server.voicebroadcast <- &VoiceBroadcast{
+				client.server.voiceBroadcast <- &VoiceBroadcast{
 					client: client,
 					buf:    outbuf[0 : 1+outgoing.Size()],
 					target: target,
@@ -500,11 +500,13 @@ func (client *Client) tlsRecvLoop() {
 		// what version of the protocol it should speak.
 		if client.state == StateClientConnected {
 			version := &mumbleproto.Version{
-				Version:     proto.Uint32(0x10205),
-				Release:     proto.String("Grumble"),
-				CryptoModes: cryptstate.SupportedModes(),
+				// TODO: What was the point of making a version const when we are going to hardcode it everywhere?
+				Version: proto.Uint32(0x10205),
+				// TODO: Okay again, why are we not using a const?
+				Release:     proto.String("Mumble"),
+				CryptoModes: SupportedModes(),
 			}
-			if client.server.cfg.BoolValue("SendOSInfo") {
+			if client.server.config.BoolValue("SendOSInfo") {
 				version.Os = proto.String(runtime.GOOS)
 				version.OsVersion = proto.String("(Unknown version)")
 			}
@@ -560,7 +562,7 @@ func (client *Client) tlsRecvLoop() {
 			// Check if the requested crypto mode is supported
 			// by us. If not, fall back to the default crypto
 			// mode.
-			supportedModes := cryptstate.SupportedModes()
+			supportedModes := SupportedModes()
 			ok := false
 			for _, mode := range supportedModes {
 				if requestedMode == mode {
@@ -595,7 +597,8 @@ func (client *Client) sendChannelTree(channel *Channel) {
 		if client.Version >= 0x10202 {
 			chanstate.DescriptionHash = channel.DescriptionBlobHashBytes()
 		} else {
-			buf, err := blobStore.Get(channel.DescriptionBlob)
+			// TODO: Can we please just use a key/value store? Orrr the fucking SQL database we implemented? For fucks sake
+			buf, err := BlobStoreGet(channel.DescriptionBlob)
 			if err != nil {
 				panic("Blobstore error.")
 			}

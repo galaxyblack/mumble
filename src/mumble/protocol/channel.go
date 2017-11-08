@@ -22,6 +22,7 @@ type Channel struct {
 	Links map[int]*Channel
 
 	// Blobs
+	// TODO: Why not use the Blob object? Lol seriously, whats the point of the blob object then?
 	DescriptionBlob string
 }
 

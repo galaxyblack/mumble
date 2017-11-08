@@ -584,7 +584,7 @@ func (m *ServerSync) GetPermissions() uint64 {
 // Sent by the client when it wants a channel removed. Sent by the server when
 // a channel has been removed and clients should be notified.
 type ChannelRemove struct {
-	ChannelId        *uint32 `protobuf:"varint,1,req,name=channel_id,json=channelId" json:"channel_id,omitempty"`
+	ChannelID        *uint32 `protobuf:"varint,1,req,name=channel_id,json=channelId" json:"channel_id,omitempty"`
 	XXX_unrecognized []byte  `json:"-"`
 }
 
@@ -593,9 +593,9 @@ func (m *ChannelRemove) String() string            { return proto.CompactTextStr
 func (*ChannelRemove) ProtoMessage()               {}
 func (*ChannelRemove) Descriptor() ([]byte, []int) { return fileDescriptor0, []int{6} }
 
-func (m *ChannelRemove) GetChannelId() uint32 {
-	if m != nil && m.ChannelId != nil {
-		return *m.ChannelId
+func (m *ChannelRemove) GetChannelID() uint32 {
+	if m != nil && m.ChannelID != nil {
+		return *m.ChannelID
 	}
 	return 0
 }
@@ -603,9 +603,10 @@ func (m *ChannelRemove) GetChannelId() uint32 {
 // Used to communicate channel properties between the client and the server.
 // Sent by the server during the login process or when channel properties are
 // updated. Client may use this message to update said channel properties.
+// TODO: Using ID internally in the Go lang code but using ID to remain consistent with the existing bad API choices :)
 type ChannelState struct {
 	// Unique ID for the channel within the server.
-	ChannelId *uint32 `protobuf:"varint,1,opt,name=channel_id,json=channelId" json:"channel_id,omitempty"`
+	ChannelID *uint32 `protobuf:"varint,1,opt,name=channel_id,json=channelId" json:"channel_id,omitempty"`
 	// channel_id of the parent channel.
 	Parent *uint32 `protobuf:"varint,2,opt,name=parent" json:"parent,omitempty"`
 	// UTF-8 encoded channel name.
@@ -641,9 +642,9 @@ func (*ChannelState) Descriptor() ([]byte, []int) { return fileDescriptor0, []in
 const Default_ChannelState_Temporary bool = false
 const Default_ChannelState_Position int32 = 0
 
-func (m *ChannelState) GetChannelId() uint32 {
-	if m != nil && m.ChannelId != nil {
-		return *m.ChannelId
+func (m *ChannelState) GetChannelID() uint32 {
+	if m != nil && m.ChannelID != nil {
+		return *m.ChannelID
 	}
 	return 0
 }
@@ -780,9 +781,9 @@ type UserState struct {
 	// User name, UTF-8 encoded.
 	Name *string `protobuf:"bytes,3,opt,name=name" json:"name,omitempty"`
 	// Registered user ID if the user is registered.
-	UserId *uint32 `protobuf:"varint,4,opt,name=user_id,json=userId" json:"user_id,omitempty"`
+	UserID *uint32 `protobuf:"varint,4,opt,name=user_id,json=userId" json:"user_id,omitempty"`
 	// Channel on which the user is.
-	ChannelId *uint32 `protobuf:"varint,5,opt,name=channel_id,json=channelId" json:"channel_id,omitempty"`
+	ChannelID *uint32 `protobuf:"varint,5,opt,name=channel_id,json=channelId" json:"channel_id,omitempty"`
 	// True if the user is muted by admin.
 	Mute *bool `protobuf:"varint,6,opt,name=mute" json:"mute,omitempty"`
 	// True if the user is deafened by admin.
@@ -841,16 +842,16 @@ func (m *UserState) GetName() string {
 	return ""
 }
 
-func (m *UserState) GetUserId() uint32 {
-	if m != nil && m.UserId != nil {
-		return *m.UserId
+func (m *UserState) GetUserID() uint32 {
+	if m != nil && m.UserID != nil {
+		return *m.UserID
 	}
 	return 0
 }
 
-func (m *UserState) GetChannelId() uint32 {
-	if m != nil && m.ChannelId != nil {
-		return *m.ChannelId
+func (m *UserState) GetChannelID() uint32 {
+	if m != nil && m.ChannelID != nil {
+		return *m.ChannelID
 	}
 	return 0
 }
@@ -1066,10 +1067,10 @@ type TextMessage struct {
 	Session []uint32 `protobuf:"varint,2,rep,name=session" json:"session,omitempty"`
 	// The channels to which the message is sent, identified by their
 	// channel_ids.
-	ChannelId []uint32 `protobuf:"varint,3,rep,name=channel_id,json=channelId" json:"channel_id,omitempty"`
+	ChannelID []uint32 `protobuf:"varint,3,rep,name=channel_id,json=channelId" json:"channel_id,omitempty"`
 	// The root channels when sending message recursively to several channels,
 	// identified by their channel_ids.
-	TreeId []uint32 `protobuf:"varint,4,rep,name=tree_id,json=treeId" json:"tree_id,omitempty"`
+	TreeID []uint32 `protobuf:"varint,4,rep,name=tree_id,json=treeId" json:"tree_id,omitempty"`
 	// The UTF-8 encoded message. May be HTML if the server allows.
 	Message          *string `protobuf:"bytes,5,req,name=message" json:"message,omitempty"`
 	XXX_unrecognized []byte  `json:"-"`
@@ -1094,16 +1095,16 @@ func (m *TextMessage) GetSession() []uint32 {
 	return nil
 }
 
-func (m *TextMessage) GetChannelId() []uint32 {
+func (m *TextMessage) GetChannelID() []uint32 {
 	if m != nil {
-		return m.ChannelId
+		return m.ChannelID
 	}
 	return nil
 }
 
-func (m *TextMessage) GetTreeId() []uint32 {
+func (m *TextMessage) GetTreeID() []uint32 {
 	if m != nil {
-		return m.TreeId
+		return m.TreeID
 	}
 	return nil
 }
@@ -1120,7 +1121,7 @@ type PermissionDenied struct {
 	Permission *uint32 `protobuf:"varint,1,opt,name=permission" json:"permission,omitempty"`
 	// channel_id for the channel where the permission was denied when type is
 	// Permission.
-	ChannelId *uint32 `protobuf:"varint,2,opt,name=channel_id,json=channelId" json:"channel_id,omitempty"`
+	ChannelID *uint32 `protobuf:"varint,2,opt,name=channel_id,json=channelId" json:"channel_id,omitempty"`
 	// The user who was denied permissions, identified by session.
 	Session *uint32 `protobuf:"varint,3,opt,name=session" json:"session,omitempty"`
 	// Textual reason for the denial.
@@ -1144,9 +1145,9 @@ func (m *PermissionDenied) GetPermission() uint32 {
 	return 0
 }
 
-func (m *PermissionDenied) GetChannelId() uint32 {
-	if m != nil && m.ChannelId != nil {
-		return *m.ChannelId
+func (m *PermissionDenied) GetChannelID() uint32 {
+	if m != nil && m.ChannelID != nil {
+		return *m.ChannelID
 	}
 	return 0
 }
@@ -1181,7 +1182,7 @@ func (m *PermissionDenied) GetName() string {
 
 type ACL struct {
 	// Channel ID of the channel this message affects.
-	ChannelId *uint32 `protobuf:"varint,1,req,name=channel_id,json=channelId" json:"channel_id,omitempty"`
+	ChannelID *uint32 `protobuf:"varint,1,req,name=channel_id,json=channelId" json:"channel_id,omitempty"`
 	// True if the channel inherits its parent's ACLs.
 	InheritAcls *bool `protobuf:"varint,2,opt,name=inherit_acls,json=inheritAcls,def=1" json:"inherit_acls,omitempty"`
 	// User group specifications.
@@ -1201,9 +1202,9 @@ func (*ACL) Descriptor() ([]byte, []int) { return fileDescriptor0, []int{13} }
 const Default_ACL_InheritAcls bool = true
 const Default_ACL_Query bool = false
 
-func (m *ACL) GetChannelId() uint32 {
-	if m != nil && m.ChannelId != nil {
-		return *m.ChannelId
+func (m *ACL) GetChannelID() uint32 {
+	if m != nil && m.ChannelID != nil {
+		return *m.ChannelID
 	}
 	return 0
 }
@@ -1321,7 +1322,7 @@ type ACL_ChanACL struct {
 	// True if the ACL has been inherited from the parent.
 	Inherited *bool `protobuf:"varint,3,opt,name=inherited,def=1" json:"inherited,omitempty"`
 	// ID of the user that is affected by this ACL.
-	UserId *uint32 `protobuf:"varint,4,opt,name=user_id,json=userId" json:"user_id,omitempty"`
+	UserID *uint32 `protobuf:"varint,4,opt,name=user_id,json=userId" json:"user_id,omitempty"`
 	// ID of the group that is affected by this ACL.
 	Group *string `protobuf:"bytes,5,opt,name=group" json:"group,omitempty"`
 	// Bit flag field of the permissions granted by this ACL.
@@ -1361,9 +1362,9 @@ func (m *ACL_ChanACL) GetInherited() bool {
 	return Default_ACL_ChanACL_Inherited
 }
 
-func (m *ACL_ChanACL) GetUserId() uint32 {
-	if m != nil && m.UserId != nil {
-		return *m.UserId
+func (m *ACL_ChanACL) GetUserID() uint32 {
+	if m != nil && m.UserID != nil {
+		return *m.UserID
 	}
 	return 0
 }
@@ -1394,7 +1395,7 @@ func (m *ACL_ChanACL) GetDeny() uint32 {
 // server fills the missing parts and sends the message back.
 type QueryUsers struct {
 	// user_ids.
-	Ids []uint32 `protobuf:"varint,1,rep,name=ids" json:"ids,omitempty"`
+	IDs []uint32 `protobuf:"varint,1,rep,name=ids" json:"ids,omitempty"`
 	// User names in the same order as ids.
 	Names            []string `protobuf:"bytes,2,rep,name=names" json:"names,omitempty"`
 	XXX_unrecognized []byte   `json:"-"`
@@ -1405,9 +1406,9 @@ func (m *QueryUsers) String() string            { return proto.CompactTextString
 func (*QueryUsers) ProtoMessage()               {}
 func (*QueryUsers) Descriptor() ([]byte, []int) { return fileDescriptor0, []int{14} }
 
-func (m *QueryUsers) GetIds() []uint32 {
+func (m *QueryUsers) GetIDs() []uint32 {
 	if m != nil {
-		return m.Ids
+		return m.IDs
 	}
 	return nil
 }
@@ -1508,7 +1509,7 @@ type ContextAction struct {
 	// The target User for the action, identified by session.
 	Session *uint32 `protobuf:"varint,1,opt,name=session" json:"session,omitempty"`
 	// The target Channel for the action, identified by channel_id.
-	ChannelId *uint32 `protobuf:"varint,2,opt,name=channel_id,json=channelId" json:"channel_id,omitempty"`
+	ChannelID *uint32 `protobuf:"varint,2,opt,name=channel_id,json=channelId" json:"channel_id,omitempty"`
 	// The action that should be executed.
 	Action           *string `protobuf:"bytes,3,req,name=action" json:"action,omitempty"`
 	XXX_unrecognized []byte  `json:"-"`
@@ -1526,9 +1527,9 @@ func (m *ContextAction) GetSession() uint32 {
 	return 0
 }
 
-func (m *ContextAction) GetChannelId() uint32 {
-	if m != nil && m.ChannelId != nil {
-		return *m.ChannelId
+func (m *ContextAction) GetChannelID() uint32 {
+	if m != nil && m.ChannelID != nil {
+		return *m.ChannelID
 	}
 	return 0
 }
@@ -1561,7 +1562,7 @@ func (m *UserList) GetUsers() []*UserList_User {
 
 type UserList_User struct {
 	// Registered user ID.
-	UserId *uint32 `protobuf:"varint,1,req,name=user_id,json=userId" json:"user_id,omitempty"`
+	UserID *uint32 `protobuf:"varint,1,req,name=user_id,json=userId" json:"user_id,omitempty"`
 	// Registered user name.
 	Name             *string `protobuf:"bytes,2,opt,name=name" json:"name,omitempty"`
 	LastSeen         *string `protobuf:"bytes,3,opt,name=last_seen,json=lastSeen" json:"last_seen,omitempty"`
@@ -1574,9 +1575,9 @@ func (m *UserList_User) String() string            { return proto.CompactTextStr
 func (*UserList_User) ProtoMessage()               {}
 func (*UserList_User) Descriptor() ([]byte, []int) { return fileDescriptor0, []int{18, 0} }
 
-func (m *UserList_User) GetUserId() uint32 {
-	if m != nil && m.UserId != nil {
-		return *m.UserId
+func (m *UserList_User) GetUserID() uint32 {
+	if m != nil && m.UserID != nil {
+		return *m.UserID
 	}
 	return 0
 }
@@ -1608,7 +1609,7 @@ func (m *UserList_User) GetLastChannel() uint32 {
 // talking. Maximum target ID is 30.
 type VoiceTarget struct {
 	// Voice target ID.
-	Id *uint32 `protobuf:"varint,1,opt,name=id" json:"id,omitempty"`
+	ID *uint32 `protobuf:"varint,1,opt,name=id" json:"id,omitempty"`
 	// The receivers that this voice target includes.
 	Targets          []*VoiceTarget_Target `protobuf:"bytes,2,rep,name=targets" json:"targets,omitempty"`
 	XXX_unrecognized []byte                `json:"-"`
@@ -1619,9 +1620,9 @@ func (m *VoiceTarget) String() string            { return proto.CompactTextStrin
 func (*VoiceTarget) ProtoMessage()               {}
 func (*VoiceTarget) Descriptor() ([]byte, []int) { return fileDescriptor0, []int{19} }
 
-func (m *VoiceTarget) GetId() uint32 {
-	if m != nil && m.Id != nil {
-		return *m.Id
+func (m *VoiceTarget) GetID() uint32 {
+	if m != nil && m.ID != nil {
+		return *m.ID
 	}
 	return 0
 }
@@ -1637,7 +1638,7 @@ type VoiceTarget_Target struct {
 	// Users that are included as targets.
 	Session []uint32 `protobuf:"varint,1,rep,name=session" json:"session,omitempty"`
 	// Channels that are included as targets.
-	ChannelId *uint32 `protobuf:"varint,2,opt,name=channel_id,json=channelId" json:"channel_id,omitempty"`
+	ChannelID *uint32 `protobuf:"varint,2,opt,name=channel_id,json=channelId" json:"channel_id,omitempty"`
 	// TODO ??
 	Group *string `protobuf:"bytes,3,opt,name=group" json:"group,omitempty"`
 	// True if the voice should follow links from the specified channel.
@@ -1663,9 +1664,9 @@ func (m *VoiceTarget_Target) GetSession() []uint32 {
 	return nil
 }
 
-func (m *VoiceTarget_Target) GetChannelId() uint32 {
-	if m != nil && m.ChannelId != nil {
-		return *m.ChannelId
+func (m *VoiceTarget_Target) GetChannelID() uint32 {
+	if m != nil && m.ChannelID != nil {
+		return *m.ChannelID
 	}
 	return 0
 }
@@ -1696,7 +1697,7 @@ func (m *VoiceTarget_Target) GetChildren() bool {
 // channel permissions.
 type PermissionQuery struct {
 	// channel_id of the channel for which the permissions are queried.
-	ChannelId *uint32 `protobuf:"varint,1,opt,name=channel_id,json=channelId" json:"channel_id,omitempty"`
+	ChannelID *uint32 `protobuf:"varint,1,opt,name=channel_id,json=channelId" json:"channel_id,omitempty"`
 	// Channel permissions.
 	Permissions *uint32 `protobuf:"varint,2,opt,name=permissions" json:"permissions,omitempty"`
 	// True if the client should drop its current permission information for all
@@ -1712,9 +1713,9 @@ func (*PermissionQuery) Descriptor() ([]byte, []int) { return fileDescriptor0, [
 
 const Default_PermissionQuery_Flush bool = false
 
-func (m *PermissionQuery) GetChannelId() uint32 {
-	if m != nil && m.ChannelId != nil {
-		return *m.ChannelId
+func (m *PermissionQuery) GetChannelID() uint32 {
+	if m != nil && m.ChannelID != nil {
+		return *m.ChannelID
 	}
 	return 0
 }

@@ -77,16 +77,17 @@ func extractKeyComponents(key string) (dir string, fn string, err error) {
 	return key[0:2], key, nil
 }
 
-// Get returns a byte slice containing the contents of
+// BlobStoreGet returns a byte slice containing the contents of
 // the blob identified by key. If no such blob is found,
-// Get returns ErrNoSuchKey.
-func (bs BlobStore) Get(key string) ([]byte, error) {
+// BlobStoreGet returns ErrNoSuchKey.
+// TODO: Can we just use a key/value store bitte?
+func BlobStoreGet(key string) ([]byte, error) {
 	dir, fn, err := extractKeyComponents(key)
 	if err != nil {
 		return nil, err
 	}
 
-	blobfn := filepath.Join(bs.dir, dir, fn)
+	blobfn := filepath.Join(dir, dir, fn)
 	f, err := os.Open(blobfn)
 	if os.IsNotExist(err) {
 		return nil, ErrNoSuchKey
@@ -124,7 +125,7 @@ func (bs BlobStore) Put(buf []byte) (key string, err error) {
 	}
 	key = hex.EncodeToString(h.Sum(nil))
 
-	// Get the components that make up the on-disk
+	// BlobstoreGet the components that make up the on-disk
 	// path for the blob.
 	dir, fn, err := extractKeyComponents(key)
 	if err != nil {

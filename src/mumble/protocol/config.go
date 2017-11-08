@@ -5,7 +5,11 @@ import (
 	"sync"
 )
 
-var defaultCfg = map[string]string{
+var defaultConfig = map[string]string{
+	// TODO: Adding the arguments passed to the fucking program to the fucking config for fucks sake, sorry this is just getting absurdist
+	"DataDir": "~/.local/config/mumble",
+	//  TODO: Whats wrong with structs? Is this map really better? It could be a the built in attributes with a custom map for other values...and be way fucking faster, considering
+	// these are probably checked, every time a user does anything?
 	"MaxBandwidth":          "72000",
 	"MaxUsers":              "1000",
 	"MaxUsersPerChannel":    "0",
@@ -20,56 +24,73 @@ var defaultCfg = map[string]string{
 }
 
 type Config struct {
-	cfgMap map[string]string
-	mutex  sync.RWMutex
+	// TODO: Define some default values
+	DataDirectory string // TODO: Only fucking one that should be a string!!!!
+	// TODO: Should this be uint? Itd be much faster for comparisons, if we are going to do these comparisons all the time anyways
+	MaxBandwidth       string
+	MaxUsers           string
+	MaxUsersPerChannel string
+	// TODO: For fucks sake, we know this is checked every fucking message, and we are doing string comparison? Yep I've fucking lost it
+	MaxTestMessageLength  string
+	MaxImageMessageLength string
+	AllowHTML             string // TODO: Can we just use a bool? EVERY MESSAGE WE ARE CHECKING THIS? a bool as a string? for fucks sake
+	// TODO: Just read above todos and apply below, right now I just want something to build and work, so fuck everything but seriously, this is awful design
+	DefaultChannel       string
+	RememberChannel      string
+	WelcomeText          string
+	SendVersion          string
+	customConfigurations map[string]string // TODO: I really prefer use a key value store but this is not terrible if we are talking about a few custom values
+	// TODO: But keep in mind why use a string instead of a struct that lets the object be an int, uint, bool, and string for comparison so we dont wnat to slit our wrists and waste money and energy? there is a reason we didnt write this in JS
+	configMap map[string]string
+	mutex     sync.RWMutex
 }
 
-// Create a new Config using cfgMap as the intial internal config map.
-// If cfgMap is nil, ConfigWithMap will create a new config map.
-func New(cfgMap map[string]string) *Config {
-	if cfgMap == nil {
-		cfgMap = make(map[string]string)
+// Create a new Config using configMap as the intial internal config map.
+// If configMap is nil, ConfigWithMap will create a new config map.
+func New(configMap map[string]string) *Config {
+	if configMap == nil {
+		configMap = make(map[string]string)
 	}
-	return &Config{cfgMap: cfgMap}
+	return &Config{configMap: configMap}
 }
 
 // Get a copy of the Config's internal config map
-func (cfg *Config) GetAll() (all map[string]string) {
-	cfg.mutex.RLock()
-	defer cfg.mutex.RUnlock()
+func (config *Config) GetAll() (all map[string]string) {
+	config.mutex.RLock()
+	defer config.mutex.RUnlock()
 
 	all = make(map[string]string)
-	for k, v := range cfg.cfgMap {
+	for k, v := range config.configMap {
 		all[k] = v
 	}
 	return
 }
 
 // Set a new value for a config key
-func (cfg *Config) Set(key string, value string) {
-	cfg.mutex.Lock()
-	defer cfg.mutex.Unlock()
-	cfg.cfgMap[key] = value
+func (config *Config) Set(key string, value string) {
+	config.mutex.Lock()
+	defer config.mutex.Unlock()
+	config.configMap[key] = value
 }
 
 // Reset the value of a config key
-func (cfg *Config) Reset(key string) {
-	cfg.mutex.Lock()
-	defer cfg.mutex.Unlock()
-	delete(cfg.cfgMap, key)
+func (config *Config) Reset(key string) {
+	config.mutex.Lock()
+	defer config.mutex.Unlock()
+	delete(config.configMap, key)
 }
 
 // Get the value of a specific config key encoded as a string
-func (cfg *Config) StringValue(key string) (value string) {
-	cfg.mutex.RLock()
-	defer cfg.mutex.RUnlock()
+func (config *Config) StringValue(key string) (value string) {
+	config.mutex.RLock()
+	defer config.mutex.RUnlock()
 
-	value, exists := cfg.cfgMap[key]
+	value, exists := config.configMap[key]
 	if exists {
 		return value
 	}
 
-	value, exists = defaultCfg[key]
+	value, exists = defaultConfig[key]
 	if exists {
 		return value
 	}
@@ -78,22 +99,22 @@ func (cfg *Config) StringValue(key string) (value string) {
 }
 
 // Get the value of a speific config key as an int
-func (cfg *Config) IntValue(key string) (intval int) {
-	str := cfg.StringValue(key)
+func (config *Config) IntValue(key string) (intval int) {
+	str := config.StringValue(key)
 	intval, _ = strconv.Atoi(str)
 	return
 }
 
 // Get the value of a specific config key as a uint32
-func (cfg *Config) Uint32Value(key string) (uint32val uint32) {
-	str := cfg.StringValue(key)
+func (config *Config) Uint32Value(key string) (uint32val uint32) {
+	str := config.StringValue(key)
 	uintval, _ := strconv.ParseUint(str, 10, 0)
 	return uint32(uintval)
 }
 
 // Get the value fo a sepcific config key as a bool
-func (cfg *Config) BoolValue(key string) (boolval bool) {
-	str := cfg.StringValue(key)
+func (config *Config) BoolValue(key string) (boolval bool) {
+	str := config.StringValue(key)
 	boolval, _ = strconv.ParseBool(str)
 	return
 }

@@ -26,3 +26,5 @@ goinstall.log
 build/
 src/github.com
 src/golang.org
+bin/
+pkg/

@@ -22,12 +22,12 @@ import (
 )
 
 // The default port a Murmur server listens on
-const DefaultPort = 64738
-const UDPPacketSize = 1024
-
-const LogOpsBeforeSync = 100
-const CeltCompatBitstream = -2147483637
+// TODO: These should not be constants :( this should be defined by the user or have a default value :( :( seriously this kind of programming makes me sad ;_;
 const (
+	DefaultPort          = 64738
+	UDPPacketSize        = 1024
+	LogOpsBeforeSync     = 100
+	CeltCompatBitstream  = -2147483637
 	StateClientConnected = iota
 	StateServerSentVersion
 	StateClientSentVersion
@@ -43,20 +43,23 @@ type KeyValuePair struct {
 }
 
 // A Mumble (Murmur) server instance
+// TODO: Exactly its a server instance, so why are we not storing server configuration values here!!!!!
+// if done correclty, this can support clusters
 type Server struct {
-	Id int64
+	ID uint32
 
-	tcpl    *net.TCPListener
-	tlsl    net.Listener
-	udpconn *net.UDPConn
-	tlscfg  *tls.Config
-	bye     chan bool
-	netwg   sync.WaitGroup
-	running bool
+	// TODO: Do MORE cleanup on these names, follow Go convention, and make it readable so, we dont have to have inside knowledge to understand our server struct, pretty important data type one would hope
+	tcpListener   *net.TCPListener
+	tlsListener   net.Listener
+	udpConnection *net.UDPConn
+	tlsConfig     *tls.Config
+	bye           chan bool
+	waitGroup     sync.WaitGroup
+	isRunning     bool
 
 	incoming       chan *Message
-	voicebroadcast chan *VoiceBroadcast
-	cfgUpdate      chan *KeyValuePair
+	voiceBroadcast chan *VoiceBroadcast
+	configUpdate   chan *KeyValuePair
 	tempRemove     chan *Channel
 
 	// Signals to the server that a client has been successfully
@@ -64,15 +67,15 @@ type Server struct {
 	clientAuthenticated chan *Client
 
 	// Server configuration
-	cfg *Config
+	config *Config
 
 	// Clients
 	clients map[uint32]*Client
 
 	// Host, host/port -> client mapping
-	hmutex    sync.Mutex
-	hclients  map[string][]*Client
-	hpclients map[string]*Client
+	hMutex    sync.Mutex
+	hClients  map[string][]*Client
+	hpClients map[string]*Client
 
 	// Codec information
 	AlphaCodec       int32
@@ -82,20 +85,22 @@ type Server struct {
 
 	// Channels
 	Channels   map[int]*Channel
-	nextChanId int
+	nextChanID int
 
 	// Users
 	Users       map[uint32]*User
 	UserCertMap map[string]*User
 	UserNameMap map[string]*User
-	nextUserId  uint32
+	nextUserID  uint32
 
 	// Sessions
 	pool *SessionPool
 
 	// Freezer
+	// TODO: This freezer stuff is really bad, I would prefer to just use something like bolt, an embedded key/value store and let it do this
+	// that way we can avoid writing the same code worse
 	numLogOps int
-	freezelog *Log
+	freezeLog *Log
 
 	// Bans
 	banlock sync.RWMutex
@@ -122,22 +127,23 @@ func (lf clientLogForwarder) Write(incoming []byte) (int, error) {
 func NewServer(id int64) (s *Server, err error) {
 	s = new(Server)
 
-	s.Id = id
+	s.ID = id
 
-	s.cfg = serverconf.New(nil)
+	s.config = serverconf.New(nil)
 
+	// TODO: Whats the point of the SQL db if we arent going to put the users there? Lets move this to key/value, this is insane
 	s.Users = make(map[uint32]*User)
 	s.UserCertMap = make(map[string]*User)
 	s.UserNameMap = make(map[string]*User)
 	s.Users[0], err = NewUser(0, "SuperUser")
 	s.UserNameMap["SuperUser"] = s.Users[0]
-	s.nextUserId = 1
+	s.nextUserID = 1
 
 	s.Channels = make(map[int]*Channel)
 	s.Channels[0] = NewChannel(0, "Root")
-	s.nextChanId = 1
+	s.nextChanID = 1
 
-	s.Logger = log.New(&logtarget.Target, fmt.Sprintf("[%v] ", s.Id), log.LstdFlags|log.Lmicroseconds)
+	s.Logger = log.New(&logtarget.Target, fmt.Sprintf("[%v] ", s.ID), log.LstdFlags|log.Lmicroseconds)
 
 	return
 }
@@ -171,6 +177,8 @@ func (server *Server) SetSuperUserPassword(password string) {
 	digest := hex.EncodeToString(hasher.Sum(nil))
 
 	// Could be racy, but shouldn't really matter...
+	// TODO: No this does matter, jesus fucking christ, it fucking matters!
+	// TODO: Also don't use sha1, come on, its 2017
 	key := "SuperUserPassword"
 	val := "sha1$" + salt + "$" + digest
 	server.cfg.Set(key, val)
@@ -317,33 +325,33 @@ func (server *Server) RemoveClient(client *Client, kicked bool) {
 
 // Add a new channel to the server. Automatically assign it a channel ID.
 func (server *Server) AddChannel(name string) (channel *Channel) {
-	channel = NewChannel(server.nextChanId, name)
-	server.Channels[channel.Id] = channel
-	server.nextChanId += 1
+	channel = NewChannel(server.nextChanID, name)
+	server.Channels[channel.ID] = channel
+	server.nextChanID += 1
 
 	return
 }
 
 // Remove a channel from the server.
 func (server *Server) RemoveChanel(channel *Channel) {
-	if channel.Id == 0 {
+	if channel.ID == 0 {
 		server.Printf("Attempted to remove root channel.")
 		return
 	}
 
-	delete(server.Channels, channel.Id)
+	delete(server.Channels, channel.ID)
 }
 
 // Link two channels
 func (server *Server) LinkChannels(channel *Channel, other *Channel) {
-	channel.Links[other.Id] = other
-	other.Links[channel.Id] = channel
+	channel.Links[other.ID] = other
+	other.Links[channel.ID] = channel
 }
 
 // Unlink two channels
 func (server *Server) UnlinkChannels(channel *Channel, other *Channel) {
-	delete(channel.Links, other.Id)
-	delete(other.Links, channel.Id)
+	delete(channel.Links, other.ID)
+	delete(other.Links, channel.ID)
 }
 
 // This is the synchronous handler goroutine.
@@ -532,7 +540,7 @@ func (server *Server) finishAuthenticate(client *Client) {
 	if client.user != nil {
 		found := false
 		for _, connectedClient := range server.clients {
-			if connectedClient.UserId() == client.UserId() {
+			if connectedClient.UserID() == client.UserID() {
 				found = true
 				break
 			}
@@ -576,7 +584,7 @@ func (server *Server) finishAuthenticate(client *Client) {
 
 	channel := server.RootChannel()
 	if client.IsRegistered() {
-		lastChannel := server.Channels[client.user.LastChannelId]
+		lastChannel := server.Channels[client.user.LastChannelID]
 		if lastChannel != nil {
 			channel = lastChannel
 		}
@@ -585,7 +593,7 @@ func (server *Server) finishAuthenticate(client *Client) {
 	userstate := &mumbleproto.UserState{
 		Session:   proto.Uint32(client.Session()),
 		Name:      proto.String(client.ShownName()),
-		ChannelId: proto.Uint32(uint32(channel.Id)),
+		ChannelID: proto.Uint32(uint32(channel.ID)),
 	}
 
 	if client.HasCertificate() {
@@ -593,7 +601,7 @@ func (server *Server) finishAuthenticate(client *Client) {
 	}
 
 	if client.IsRegistered() {
-		userstate.UserId = proto.Uint32(uint32(client.UserId()))
+		userstate.UserID = proto.Uint32(uint32(client.UserID()))
 
 		if client.user.HasTexture() {
 			// Does the client support blobs?
@@ -769,7 +777,7 @@ func (server *Server) sendUserList(client *Client) {
 		userstate := &mumbleproto.UserState{
 			Session:   proto.Uint32(connectedClient.Session()),
 			Name:      proto.String(connectedClient.ShownName()),
-			ChannelId: proto.Uint32(uint32(connectedClient.Channel.Id)),
+			ChannelID: proto.Uint32(uint32(connectedClient.Channel.ID)),
 		}
 
 		if connectedClient.HasCertificate() {
@@ -777,7 +785,7 @@ func (server *Server) sendUserList(client *Client) {
 		}
 
 		if connectedClient.IsRegistered() {
-			userstate.UserId = proto.Uint32(uint32(connectedClient.UserId()))
+			userstate.UserID = proto.Uint32(uint32(connectedClient.UserID()))
 
 			if connectedClient.user.HasTexture() {
 				// Does the client support blobs?
@@ -851,7 +859,7 @@ func (server *Server) sendClientPermissions(client *Client, channel *Channel) {
 
 	perm := acl.Permission(acl.NonePermission)
 	client.sendMessage(&mumbleproto.PermissionQuery{
-		ChannelId:   proto.Uint32(uint32(channel.Id)),
+		ChannelID:   proto.Uint32(uint32(channel.ID)),
 		Permissions: proto.Uint32(uint32(perm)),
 	})
 }
@@ -921,7 +929,7 @@ func (server *Server) handleIncomingMessage(client *Client, msg *Message) {
 
 // Send the content of buf as a UDP packet to addr.
 func (s *Server) SendUDP(buf []byte, addr *net.UDPAddr) (err error) {
-	_, err = s.udpconn.WriteTo(buf, addr)
+	_, err = s.udpConnection.WriteTo(buf, addr)
 	return
 }
 
@@ -931,7 +939,7 @@ func (server *Server) udpListenLoop() {
 
 	buf := make([]byte, UDPPacketSize)
 	for {
-		nread, remote, err := server.udpconn.ReadFrom(buf)
+		nread, remote, err := server.udpConnection.ReadFrom(buf)
 		if err != nil {
 			if isTimeout(err) {
 				continue
@@ -942,7 +950,7 @@ func (server *Server) udpListenLoop() {
 
 		udpaddr, ok := remote.(*net.UDPAddr)
 		if !ok {
-			server.Printf("No UDPAddr in read packet. Disabling UDP. (Windows?)")
+			server.Printf("No UDPAddr in read packet. Disabling UDP. (Windows? Please don't use that..., really its 2017...)")
 			return
 		}
 
