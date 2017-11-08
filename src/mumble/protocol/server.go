@@ -23,6 +23,8 @@ import (
 
 // The default port a Murmur server listens on
 // TODO: These should not be constants :( this should be defined by the user or have a default value :( :( seriously this kind of programming makes me sad ;_;
+// Like a default server struct with these objects loaded as defaults that are overriden by config then environmental variable then flags args.
+// Otherwise we are just wasting memory if anything is NOT default :(
 const (
 	DefaultPort          = 64738
 	UDPPacketSize        = 1024
@@ -73,9 +75,11 @@ type Server struct {
 	clients map[uint32]*Client
 
 	// Host, host/port -> client mapping
-	hMutex    sync.Mutex
-	hClients  map[string][]*Client
-	hpClients map[string]*Client
+	// TODO: A host+port combo is generally called just hostname
+	// TODO: We should just use full variable names that are readable, this is compiled not JS
+	hostMutex       sync.Mutex
+	hostClients     map[string][]*Client
+	hostnameClients map[string]*Client
 
 	// Codec information
 	AlphaCodec       int32
@@ -103,7 +107,7 @@ type Server struct {
 	freezeLog *Log
 
 	// Bans
-	banlock sync.RWMutex
+	banLock sync.RWMutex
 	Bans    []Ban
 
 	// Logging
@@ -115,35 +119,40 @@ type clientLogForwarder struct {
 	logger *log.Logger
 }
 
-func (lf clientLogForwarder) Write(incoming []byte) (int, error) {
-	buf := new(bytes.Buffer)
-	buf.WriteString(fmt.Sprintf("<%v:%v(%v)> ", lf.client.Session(), lf.client.ShownName(), lf.client.UserId()))
-	buf.Write(incoming)
-	lf.logger.Output(3, buf.String())
+func (logForwarder clientLogForwarder) Write(incoming []byte) (int, error) {
+	buffer := new(bytes.Buffer)
+	buffer.WriteString(fmt.Sprintf("<%v:%v(%v)> ", logForwarder.client.Session(), lf.client.ShownName(), lf.client.UserId()))
+	buffer.Write(incoming)
+	logForwarder.logger.Output(3, buffer.String())
 	return len(incoming), nil
 }
 
 // Allocate a new Murmur instance
-func NewServer(id int64) (s *Server, err error) {
-	s = new(Server)
+// TODO: Every other function uses the local name server, why is this using s? Consistency is always best practice
+// TODO: What? Why are we passing the ID? Generate a god damn ID, don't have us pass it, get all other shit from config, you want a server name? CONFIG!
+// TODO: Also maybe break up into new and init? Ruby had some good ideas with that
+func NewServer(id int64) (server *Server, err error) {
+	server = new(Server)
+	server.ID = id
 
-	s.ID = id
-
-	s.config = serverconf.New(nil)
+	// TODO: What the fuck? No pull this directly from JSON. Rule is: Runtime configuration > Environmental Variables > Config > Default values.
+	// this is how you make software that is not annoying as fuck to use for people you know. like not shitty, works without any config, but it can generate a blank from default if nothing is defined and easily overridden in the expected way.
+	server.config = serverConf.New(nil)
 
 	// TODO: Whats the point of the SQL db if we arent going to put the users there? Lets move this to key/value, this is insane
-	s.Users = make(map[uint32]*User)
-	s.UserCertMap = make(map[string]*User)
-	s.UserNameMap = make(map[string]*User)
-	s.Users[0], err = NewUser(0, "SuperUser")
-	s.UserNameMap["SuperUser"] = s.Users[0]
-	s.nextUserID = 1
+	// BoltDB? Fast and on-disk like the freeze shit or completely in memory database that has better way of organizing than just maps/hashes  AT THE VERY LEAST, LETS NOT USE STRING FUCKING IDS FOR FUCKS SAKE! AND LETS USE PREFIX radix based lookup? is it worth it to use a pure go implementation and cut out more code?
+	server.Users = make(map[uint32]*User)
+	server.UserCertMap = make(map[string]*User)
+	server.UserNameMap = make(map[string]*User)
+	server.Users[0], err = NewUser(0, "SuperUser")
+	server.UserNameMap["SuperUser"] = server.Users[0]
+	server.nextUserID = 1
 
-	s.Channels = make(map[int]*Channel)
-	s.Channels[0] = NewChannel(0, "Root")
-	s.nextChanID = 1
+	server.Channels = make(map[int]*Channel)
+	server.Channels[0] = NewChannel(0, "Root")
+	server.nextChanID = 1
 
-	s.Logger = log.New(&logtarget.Target, fmt.Sprintf("[%v] ", s.ID), log.LstdFlags|log.Lmicroseconds)
+	server.Logger = log.New(&logtarget.Target, fmt.Sprintf("[%v] ", server.ID), log.LstdFlags|log.Lmicroseconds)
 
 	return
 }
@@ -186,6 +195,7 @@ func (server *Server) SetSuperUserPassword(password string) {
 }
 
 // Check whether password matches the set SuperUser password.
+// TODO: Add shared secrets, ephemeral keying, OTP, 2nd-factor, etc
 func (server *Server) CheckSuperUserPassword(password string) bool {
 	parts := strings.Split(server.cfg.StringValue("SuperUserPassword"), "$")
 	if len(parts) != 3 {
@@ -218,6 +228,7 @@ func (server *Server) CheckSuperUserPassword(password string) bool {
 	h.Write([]byte(password))
 
 	sum := hex.EncodeToString(h.Sum(nil))
+	// TODO: Use DeepCompare not just ==
 	if parts[2] == sum {
 		return true
 	}
@@ -226,43 +237,48 @@ func (server *Server) CheckSuperUserPassword(password string) bool {
 }
 
 // Called by the server to initiate a new client connection.
-func (server *Server) handleIncomingClient(conn net.Conn) (err error) {
+func (server *Server) handleIncomingClient(connection net.Conn) (err error) {
 	client := new(Client)
-	addr := conn.RemoteAddr()
+	// TODO: Is it necessary to pull addr out into a variable THAT IS NOT FUCKING STORED INSIDE THE CLIENT STRUT? FUCKING HELL!
+	// Also lets again break out validations for easier testing and cleaner more readable implementation and easier potential for reuse. For example regex for ip address format validation? 1 function we could use quite a few places
+	addr := connection.RemoteAddr()
+
 	if addr == nil {
 		err = errors.New("Unable to extract address for client.")
 		return
 	}
 
-	client.lf = &clientLogForwarder{client, server.Logger}
-	client.Logger = log.New(client.lf, "", 0)
+	client.logForwarder = &clientLogForwarder{client, server.Logger}
+	client.Logger = log.New(client.logForwarder, "", 0)
 
 	client.session = server.pool.Get()
-	client.Printf("New connection: %v (%v)", conn.RemoteAddr(), client.Session())
+	client.Printf("New connection: %v (%v)", connection.RemoteAddr(), client.Session())
 
-	client.tcpaddr = addr.(*net.TCPAddr)
+	client.tcpAddr = addr.(*net.TCPAddr)
 	client.server = server
-	client.conn = conn
-	client.reader = bufio.NewReader(client.conn)
+	// TODO: Why bother setting a connection variable then assigning it to client? seems quite a bit
+	client.connection = connection
+	client.reader = bufio.NewReader(client.connection) // TODO: Feels like this could be done better
 
 	client.state = StateClientConnected
 
-	client.udprecv = make(chan []byte)
+	client.udpReceive = make(chan []byte)
 	client.voiceTargets = make(map[uint32]*VoiceTarget)
 
-	client.user = nil
+	client.user = nil // TODO: what? why are we defining nils?
 
 	// Extract user's cert hash
-	tlsconn := client.conn.(*tls.Conn)
-	err = tlsconn.Handshake()
+	tlsConnection := client.connection.(*tls.Conn)
+	err = tlsConnection.Handshake()
 	if err != nil {
 		client.Printf("TLS handshake failed: %v", err)
 		client.Disconnect()
 		return
 	}
 
-	state := tlsconn.ConnectionState()
+	state := tlsc.ConnectionState()
 	if len(state.PeerCertificates) > 0 {
+		// TODO: Sha1? No thank you. Same library has better security hashing, no reason to do this.
 		hash := sha1.New()
 		hash.Write(state.PeerCertificates[0].Raw)
 		sum := hash.Sum(nil)
@@ -277,29 +293,30 @@ func (server *Server) handleIncomingClient(conn net.Conn) (err error) {
 	}
 
 	// Launch network readers
-	go client.tlsRecvLoop()
-	go client.udpRecvLoop()
+	go client.tlsReceiveLoop()
+	go client.udpReceiveLoop()
 
 	return
 }
 
 // Remove a disconnected client from the server's
 // internal representation.
+// TODO: Bring consistency with camel-case naming, its very inconsistent.
 func (server *Server) RemoveClient(client *Client, kicked bool) {
-	server.hmutex.Lock()
-	host := client.tcpaddr.IP.String()
-	oldclients := server.hclients[host]
-	newclients := []*Client{}
-	for _, hostclient := range oldclients {
-		if hostclient != client {
-			newclients = append(newclients, hostclient)
+	server.hostMutex.Lock()
+	host := client.tcpAddr.IP.String()
+	oldClients := server.hostClients[host]
+	newClients := []*Client{}
+	for _, hostClient := range oldClients {
+		if hostClient != client {
+			newClients = append(newClients, hostClient)
 		}
 	}
-	server.hclients[host] = newclients
-	if client.udpaddr != nil {
-		delete(server.hpclients, client.udpaddr.String())
+	server.hostClients[host] = newClients
+	if client.udpAddr != nil {
+		delete(server.hostnameClients, client.udpAddr.String())
 	}
-	server.hmutex.Unlock()
+	server.hostMutex.Unlock()
 
 	delete(server.clients, client.Session())
 	server.pool.Reclaim(client.Session())
@@ -313,9 +330,10 @@ func (server *Server) RemoveClient(client *Client, kicked bool) {
 	// If the user was not kicked, broadcast a UserRemove message.
 	// If the user is disconnect via a kick, the UserRemove message has already been sent
 	// at this point.
+	// TODO: Why is kicked check not its own function? Why is it a local variable and not a attribute of the user?
 	if !kicked && client.state > StateClientAuthenticated {
 		err := server.broadcastProtoMessage(&mumbleproto.UserRemove{
-			Session: proto.Uint32(client.Session()),
+			Session: uint32(client.Session()),
 		})
 		if err != nil {
 			server.Panic("Unable to broadcast UserRemove message for disconnected client.")
@@ -325,15 +343,17 @@ func (server *Server) RemoveClient(client *Client, kicked bool) {
 
 // Add a new channel to the server. Automatically assign it a channel ID.
 func (server *Server) AddChannel(name string) (channel *Channel) {
-	channel = NewChannel(server.nextChanID, name)
+	channel = NewChannel(server.nextChannelID, name)
 	server.Channels[channel.ID] = channel
-	server.nextChanID += 1
+	// TODO: Itd be nicer to use non-consecutive/iteratable
+	server.nextChannelID += 1
 
 	return
 }
 
 // Remove a channel from the server.
 func (server *Server) RemoveChanel(channel *Channel) {
+	// TODO: Move validaiton to its own function, see every other comment for the various reasons
 	if channel.ID == 0 {
 		server.Printf("Attempted to remove root channel.")
 		return
@@ -358,7 +378,8 @@ func (server *Server) UnlinkChannels(channel *Channel, other *Channel) {
 // Important control channel messages are routed through this Goroutine
 // to keep server state synchronized.
 func (server *Server) handlerLoop() {
-	regtick := time.Tick(time.Hour)
+	// TODO: Are we short polling every hour? Why tick based over RT scheduling intervals?
+	regTick := time.Tick(time.Hour)
 	for {
 		select {
 		// We're done. Stop the server's event handler
@@ -369,37 +390,36 @@ func (server *Server) handlerLoop() {
 			client := msg.client
 			server.handleIncomingMessage(client, msg)
 		// Voice broadcast
-		case vb := <-server.voicebroadcast:
-			if vb.target == 0 { // Current channel
+		case broadcast := <-server.voiceBroadcast:
+			if broadcast.target == 0 { // Current channel
 				channel := vb.client.Channel
 				for _, client := range channel.clients {
-					if client != vb.client {
-						err := client.SendUDP(vb.buf)
+					if client != broadcast.client {
+						err := client.SendUDP(broadcast.buf)
 						if err != nil {
 							client.Panicf("Unable to send UDP: %v", err)
 						}
 					}
 				}
 			} else {
-				target, ok := vb.client.voiceTargets[uint32(vb.target)]
+				target, ok := broadcast.client.voiceTargets[uint32(broadcast.target)]
 				if !ok {
 					continue
 				}
 
-				target.SendVoiceBroadcast(vb)
+				target.SendVoiceBroadcast(broadcast)
 			}
 		// Remove a temporary channel
-		case tempChannel := <-server.tempRemove:
-			if tempChannel.IsEmpty() {
-				server.RemoveChannel(tempChannel)
+		case temporaryChannel := <-server.temporaryRemove:
+			if temporaryChannel.IsEmpty() {
+				server.RemoveChannel(temporaryChannel)
 			}
 		// Finish client authentication. Send post-authentication
 		// server info.
 		case client := <-server.clientAuthenticated:
 			server.finishAuthenticate(client)
-
 		// Disk freeze config update
-		case kvp := <-server.cfgUpdate:
+		case kvp := <-server.configUpdate:
 			if !kvp.Reset {
 				server.UpdateConfig(kvp.Key, kvp.Value)
 			} else {
@@ -413,13 +433,14 @@ func (server *Server) handlerLoop() {
 		}
 
 		// Check if its time to sync the server state and re-open the log
-		if server.numLogOps >= LogOpsBeforeSync {
+		// TODO: Why? And if we are doing this lets just use an embedded DB that can handle this logic, simplify our code and reduce bugs by sharing solutions with the community
+		if server.numLogs >= LogsBeforeSync {
 			server.Print("Writing full server snapshot to disk")
 			err := server.FreezeToFile()
 			if err != nil {
 				server.Fatal(err)
 			}
-			server.numLogOps = 0
+			server.numLogs = 0
 			server.Print("Wrote full server snapshot to disk")
 		}
 	}
@@ -439,7 +460,7 @@ func (server *Server) handleAuthenticate(client *Client, msg *Message) {
 	}
 
 	auth := &mumbleproto.Authenticate{}
-	err := proto.Unmarshal(msg.buf, auth)
+	err := proto.Unmarshal(msg.buffer, auth)
 	if err != nil {
 		client.Panic("Unable to unmarshal Authenticate message.")
 		return
@@ -457,6 +478,7 @@ func (server *Server) handleAuthenticate(client *Client, msg *Message) {
 
 	// Did we get a username?
 	if auth.Username == nil || len(*auth.Username) == 0 {
+		// TODO: Can this be changed to follow camel-case convention, since we are matching C++ server it may be impossible.
 		client.RejectAuth(mumbleproto.Reject_InvalidUsername, "Please specify a username to log in")
 		return
 	}
@@ -539,6 +561,7 @@ func (server *Server) finishAuthenticate(client *Client) {
 	// previous client and let the new guy in.
 	if client.user != nil {
 		found := false
+		// TODO: This type of comparison should be deep, and itd be better to just use an embedded database again. Or the SQL database
 		for _, connectedClient := range server.clients {
 			if connectedClient.UserID() == client.UserID() {
 				found = true
@@ -573,14 +596,13 @@ func (server *Server) finishAuthenticate(client *Client) {
 	// First, check whether we need to tell the other connected
 	// clients to switch to a codec so the new guy can actually speak.
 	server.updateCodecVersions(client)
-
 	client.sendChannelList()
 
 	// Add the client to the host slice for its host address.
-	host := client.tcpaddr.IP.String()
-	server.hmutex.Lock()
-	server.hclients[host] = append(server.hclients[host], client)
-	server.hmutex.Unlock()
+	host := client.tcpAddr.IP.String()
+	server.hostMutex.Lock()
+	server.hostClients[host] = append(server.hostClients[host], client)
+	server.hostMutex.Unlock()
 
 	channel := server.RootChannel()
 	if client.IsRegistered() {
@@ -597,52 +619,52 @@ func (server *Server) finishAuthenticate(client *Client) {
 	}
 
 	if client.HasCertificate() {
-		userstate.Hash = proto.String(client.CertHash())
+		userstate.Hash = proto.String(client.CertificateHash())
 	}
 
 	if client.IsRegistered() {
 		userstate.UserID = proto.Uint32(uint32(client.UserID()))
-
 		if client.user.HasTexture() {
 			// Does the client support blobs?
 			if client.Version >= 0x10203 {
-				userstate.TextureHash = client.user.TextureBlobHashBytes()
+				userState.TextureHash = client.user.TextureBlobHashBytes()
 			} else {
-				buf, err := blobStore.Get(client.user.TextureBlob)
+				buffer, err := blobStore.Get(client.user.TextureBlob)
 				if err != nil {
 					server.Panicf("Blobstore error: %v", err.Error())
 				}
-				userstate.Texture = buf
+				userState.Texture = buffer
 			}
 		}
 
 		if client.user.HasComment() {
 			// Does the client support blobs?
 			if client.Version >= 0x10203 {
-				userstate.CommentHash = client.user.CommentBlobHashBytes()
+				userState.CommentHash = client.user.CommentBlobHashBytes()
 			} else {
-				buf, err := blobStore.Get(client.user.CommentBlob)
+				buffer, err := blobStore.Get(client.user.CommentBlob)
 				if err != nil {
 					server.Panicf("Blobstore error: %v", err.Error())
 				}
-				userstate.Comment = proto.String(string(buf))
+				userstate.Comment = proto.String(string(buffer))
 			}
 		}
 	}
 
-	server.userEnterChannel(client, channel, userstate)
-	if err := server.broadcastProtoMessage(userstate); err != nil {
+	server.userEnterChannel(client, channel, userState)
+	if err := server.broadcastProtoMessage(userState); err != nil {
 		// Server panic?
 	}
 
 	server.sendUserList(client)
 
 	sync := &mumbleproto.ServerSync{}
-	sync.Session = proto.Uint32(client.Session())
-	sync.MaxBandwidth = proto.Uint32(server.cfg.Uint32Value("MaxBandwidth"))
-	sync.WelcomeText = proto.String(server.cfg.StringValue("WelcomeText"))
+	// TODO: Can we have key based sessions? Making them a bit harder to iterate and allow prefix tree lookups?
+	sync.Session = client.Session()
+	sync.MaxBandwidth = server.config.MaxBandwidth
+	sync.WelcomeText = server.config.WelcomeText
 	if client.IsSuperUser() {
-		sync.Permissions = proto.Uint64(uint64(acl.AllPermissions))
+		sync.Permissions = uint64(acl.AllPermissions)
 	} else {
 		// fixme(mkrautz): previously we calculated the user's
 		// permissions and sent them to the client in here. This
@@ -657,9 +679,9 @@ func (server *Server) finishAuthenticate(client *Client) {
 	}
 
 	err := client.sendMessage(&mumbleproto.ServerConfig{
-		AllowHtml:          proto.Bool(server.cfg.BoolValue("AllowHTML")),
-		MessageLength:      proto.Uint32(server.cfg.Uint32Value("MaxTextMessageLength")),
-		ImageMessageLength: proto.Uint32(server.cfg.Uint32Value("MaxImageMessageLength")),
+		AllowHtml:          server.config.AllowHTML,
+		MessageLength:      server.config.MaxTextMessageLength,
+		ImageMessageLength: server.config.MaxImageMessageLength,
 	})
 	if err != nil {
 		client.Panicf("%v", err)
@@ -679,7 +701,7 @@ func (server *Server) updateCodecVersions(connecting *Client) {
 		opus       int
 		enableOpus bool
 		txtMsg     *mumbleproto.TextMessage = &mumbleproto.TextMessage{
-			Message: proto.String("<strong>WARNING:</strong> Your client doesn't support the Opus codec the server is switching to, you won't be able to talk or hear anyone. Please upgrade to a client with Opus support."),
+			Message: "<strong>WARNING:</strong> Your client doesn't support the Opus codec the server is switching to, you won't be able to talk or hear anyone. Please upgrade to a client with Opus support.",
 		}
 	)
 
@@ -689,11 +711,11 @@ func (server *Server) updateCodecVersions(connecting *Client) {
 			opus++
 		}
 		for _, codec := range client.codecs {
-			codecusers[codec] += 1
+			codecUsers[codec] += 1
 		}
 	}
 
-	for codec, users := range codecusers {
+	for codec, users := range codecUsers {
 		if users > count {
 			count = users
 			winner = codec
@@ -710,7 +732,8 @@ func (server *Server) updateCodecVersions(connecting *Client) {
 		current = server.BetaCodec
 	}
 
-	enableOpus = users == opus
+	// If all users are opus enabled, then enable opus
+	enableOpus = (users == opus)
 
 	if winner != current {
 		if winner == CeltCompatBitstream {
@@ -748,16 +771,16 @@ func (server *Server) updateCodecVersions(connecting *Client) {
 	if server.Opus {
 		for _, client := range server.clients {
 			if !client.opus && client.state == StateClientReady {
-				txtMsg.Session = []uint32{connecting.Session()}
-				err := client.sendMessage(txtMsg)
+				textMsg.Session = []uint32{connecting.Session()}
+				err := client.sendMessage(textMsg)
 				if err != nil {
 					client.Panicf("%v", err)
 				}
 			}
 		}
 		if connecting != nil && !connecting.opus {
-			txtMsg.Session = []uint32{connecting.Session()}
-			connecting.sendMessage(txtMsg)
+			textMsg.Session = []uint32{connecting.Session()}
+			connecting.sendMessage(textMsg)
 		}
 	}
 
@@ -790,26 +813,27 @@ func (server *Server) sendUserList(client *Client) {
 			if connectedClient.user.HasTexture() {
 				// Does the client support blobs?
 				if client.Version >= 0x10203 {
-					userstate.TextureHash = connectedClient.user.TextureBlobHashBytes()
+					userState.TextureHash = connectedClient.user.TextureBlobHashBytes()
 				} else {
-					buf, err := blobStore.Get(connectedClient.user.TextureBlob)
+					buffer, err := BlobStoreGet(connectedClient.user.TextureBlob)
 					if err != nil {
 						server.Panicf("Blobstore error: %v", err.Error())
 					}
-					userstate.Texture = buf
+					userState.Texture = buffer
 				}
 			}
 
 			if connectedClient.user.HasComment() {
 				// Does the client support blobs?
+				// TODO: Break down client feature checking into individual fucntions to simplify the thresholds
 				if client.Version >= 0x10203 {
-					userstate.CommentHash = connectedClient.user.CommentBlobHashBytes()
+					userState.CommentHash = connectedClient.user.CommentBlobHashBytes()
 				} else {
-					buf, err := blobStore.Get(connectedClient.user.CommentBlob)
+					buffer, err := BlobStoreGet(connectedClient.user.CommentBlob)
 					if err != nil {
 						server.Panicf("Blobstore error: %v", err.Error())
 					}
-					userstate.Comment = proto.String(string(buf))
+					userState.Comment = proto.String(string(buffer))
 				}
 			}
 		}
@@ -839,7 +863,7 @@ func (server *Server) sendUserList(client *Client) {
 			userstate.PluginIdentity = proto.String(connectedClient.PluginIdentity)
 		}
 
-		err := client.sendMessage(userstate)
+		err := client.sendMessage(userState)
 		if err != nil {
 			// Server panic?
 			continue
@@ -859,8 +883,8 @@ func (server *Server) sendClientPermissions(client *Client, channel *Channel) {
 
 	perm := acl.Permission(acl.NonePermission)
 	client.sendMessage(&mumbleproto.PermissionQuery{
-		ChannelID:   proto.Uint32(uint32(channel.ID)),
-		Permissions: proto.Uint32(uint32(perm)),
+		ChannelID:   uint32(channel.ID),
+		Permissions: uint32(permission),
 	})
 }
 
@@ -868,7 +892,7 @@ type ClientPredicate func(client *Client) bool
 
 func (server *Server) broadcastProtoMessageWithPredicate(msg interface{}, clientcheck ClientPredicate) error {
 	for _, client := range server.clients {
-		if !clientcheck(client) {
+		if !clientCheck(client) {
 			continue
 		}
 		if client.state < StateClientAuthenticated {
@@ -927,19 +951,19 @@ func (server *Server) handleIncomingMessage(client *Client, msg *Message) {
 	}
 }
 
-// Send the content of buf as a UDP packet to addr.
-func (s *Server) SendUDP(buf []byte, addr *net.UDPAddr) (err error) {
-	_, err = s.udpConnection.WriteTo(buf, addr)
+// Send the content of buffer as a UDP packet to addr.
+func (s *Server) SendUDP(buffer []byte, addr *net.UDPAddr) (err error) {
+	_, err = s.udpConnection.WriteTo(buffer, addr)
 	return
 }
 
 // Listen for and handle UDP packets.
 func (server *Server) udpListenLoop() {
-	defer server.netwg.Done()
+	defer server.waitGroup.Done()
 
-	buf := make([]byte, UDPPacketSize)
+	buffer := make([]byte, UDPPacketSize)
 	for {
-		nread, remote, err := server.udpConnection.ReadFrom(buf)
+		nRead, remote, err := server.udpConnection.ReadFrom(buffer)
 		if err != nil {
 			if isTimeout(err) {
 				continue
@@ -948,15 +972,15 @@ func (server *Server) udpListenLoop() {
 			}
 		}
 
-		udpaddr, ok := remote.(*net.UDPAddr)
+		udpAddr, ok := remote.(*net.UDPAddr)
 		if !ok {
 			server.Printf("No UDPAddr in read packet. Disabling UDP. (Windows? Please don't use that..., really its 2017...)")
 			return
 		}
 
 		// Length 12 is for ping datagrams from the ConnectDialog.
-		if nread == 12 {
-			readbuf := bytes.NewBuffer(buf)
+		if nRead == 12 {
+			readBuffer := bytes.NewBuffer(buffer)
 			var (
 				tmp32 uint32
 				rand  uint64
@@ -968,23 +992,23 @@ func (server *Server) udpListenLoop() {
 			_ = binary.Write(buffer, binary.BigEndian, uint32((1<<16)|(2<<8)|2))
 			_ = binary.Write(buffer, binary.BigEndian, rand)
 			_ = binary.Write(buffer, binary.BigEndian, uint32(len(server.clients)))
-			_ = binary.Write(buffer, binary.BigEndian, server.cfg.Uint32Value("MaxUsers"))
-			_ = binary.Write(buffer, binary.BigEndian, server.cfg.Uint32Value("MaxBandwidth"))
+			_ = binary.Write(buffer, binary.BigEndian, server.config.MaxUsers)
+			_ = binary.Write(buffer, binary.BigEndian, server.config.MaxBandwidth)
 
-			err = server.SendUDP(buffer.Bytes(), udpaddr)
+			err = server.SendUDP(buffer.Bytes(), udpAddr)
 			if err != nil {
 				return
 			}
 
 		} else {
-			server.handleUdpPacket(udpaddr, buf[0:nread])
+			server.handleUdpPacket(udpAddr, buf[0:nRead])
 		}
 	}
 }
 
-func (server *Server) handleUdpPacket(udpaddr *net.UDPAddr, buf []byte) {
+func (server *Server) handleUDPPacket(udpAddr *net.UDPAddr, buffer []byte) {
 	var match *Client
-	plain := make([]byte, len(buf))
+	plain := make([]byte, len(buffer))
 
 	// Determine which client sent the the packet.  First, we
 	// check the map 'hpclients' in the server struct. It maps
@@ -992,11 +1016,11 @@ func (server *Server) handleUdpPacket(udpaddr *net.UDPAddr, buf []byte) {
 	//
 	// If we don't find any matches, we look in the 'hclients',
 	// which maps a host address to a slice of clients.
-	server.hmutex.Lock()
-	defer server.hmutex.Unlock()
-	client, ok := server.hpclients[udpaddr.String()]
+	server.hostMutex.Lock()
+	defer server.hostMutex.Unlock()
+	client, ok := server.hpclients[udpAddr.String()]
 	if ok {
-		err := client.crypt.Decrypt(plain, buf)
+		err := client.crypt.Decrypt(plain, buffer)
 		if err != nil {
 			client.Debugf("unable to decrypt incoming packet, requesting resync: %v", err)
 			client.cryptResync()
@@ -1005,9 +1029,9 @@ func (server *Server) handleUdpPacket(udpaddr *net.UDPAddr, buf []byte) {
 		match = client
 	} else {
 		host := udpaddr.IP.String()
-		hostclients := server.hclients[host]
-		for _, client := range hostclients {
-			err := client.crypt.Decrypt(plain[0:], buf)
+		hostclients := server.hostClients[host]
+		for _, client := range hostClients {
+			err := client.crypt.Decrypt(plain[0:], buffer)
 			if err != nil {
 				client.Debugf("unable to decrypt incoming packet, requesting resync: %v", err)
 				client.cryptResync()
@@ -1017,8 +1041,8 @@ func (server *Server) handleUdpPacket(udpaddr *net.UDPAddr, buf []byte) {
 			}
 		}
 		if match != nil {
-			match.udpaddr = udpaddr
-			server.hpclients[udpaddr.String()] = match
+			match.udpAddr = udpAddr
+			server.hostnameClients[udpAddr.String()] = match
 		}
 	}
 
@@ -1031,7 +1055,7 @@ func (server *Server) handleUdpPacket(udpaddr *net.UDPAddr, buf []byte) {
 	plain = plain[:len(plain)-match.crypt.Overhead()]
 
 	match.udp = true
-	match.udprecv <- plain
+	match.udpReceive <- plain
 }
 
 // Clear the Server's caches
@@ -1042,16 +1066,16 @@ func (server *Server) ClearCaches() {
 }
 
 // Helper method for users entering new channels
-func (server *Server) userEnterChannel(client *Client, channel *Channel, userstate *mumbleproto.UserState) {
+func (server *Server) userEnterChannel(client *Client, channel *Channel, userState *mumbleproto.UserState) {
 	if client.Channel == channel {
 		return
 	}
 
-	oldchan := client.Channel
-	if oldchan != nil {
-		oldchan.RemoveClient(client)
-		if oldchan.IsTemporary() && oldchan.IsEmpty() {
-			server.tempRemove <- oldchan
+	oldChannel := client.Channel
+	if oldChannel != nil {
+		oldChannel.RemoveClient(client)
+		if oldChannel.IsTemporary() && oldChannel.IsEmpty() {
+			server.temporaryRemove <- oldChannel
 		}
 	}
 	channel.AddClient(client)
@@ -1060,10 +1084,10 @@ func (server *Server) userEnterChannel(client *Client, channel *Channel, usersta
 
 	server.UpdateFrozenUserLastChannel(client)
 
-	canspeak := acl.HasPermission(&channel.ACL, client, acl.SpeakPermission)
+	canSpeak := acl.HasPermission(&channel.ACL, client, acl.SpeakPermission)
 	if canspeak == client.Suppress {
-		client.Suppress = !canspeak
-		userstate.Suppress = proto.Bool(client.Suppress)
+		client.Suppress != canSpeak
+		userState.Suppress = proto.Bool(client.Suppress)
 	}
 
 	server.sendClientPermissions(client, channel)
@@ -1073,97 +1097,101 @@ func (server *Server) userEnterChannel(client *Client, channel *Channel, usersta
 }
 
 // Register a client on the server.
-func (s *Server) RegisterClient(client *Client) (uid uint32, err error) {
+// TODO: But every other local variable is server not s
+func (server *Server) RegisterClient(client *Client) (uid uint32, err error) {
 	// Increment nextUserId only if registration succeeded.
 	defer func() {
 		if err == nil {
-			s.nextUserId += 1
+			server.nextUserId += 1
 		}
 	}()
 
-	user, err := NewUser(s.nextUserId, client.Username)
+	user, err := NewUser(server.nextUserId, client.Username)
 	if err != nil {
 		return 0, err
 	}
 
 	// Grumble can only register users with certificates.
+	// TODO: Use ephemeral keypairs to make a better more secure system that supports guests that can upgrade their account into full registered accounts
 	if client.HasCertificate() {
 		return 0, errors.New("no cert hash")
 	}
 
 	user.Email = client.Email
-	user.CertHash = client.CertHash()
+	user.CertificateHash = client.CertificateHash()
 
-	uid = s.nextUserId
-	s.Users[uid] = user
-	s.UserCertMap[client.CertHash()] = user
-	s.UserNameMap[client.Username] = user
+	uid = server.nextUserId
+	server.Users[uid] = user
+	server.UserCertMap[client.CertificateHash()] = user
+	server.UserNameMap[client.Username] = user
 
 	return uid, nil
 }
 
 // Remove a registered user.
-func (s *Server) RemoveRegistration(uid uint32) (err error) {
-	user, ok := s.Users[uid]
+func (server *Server) RemoveRegistration(uid uint32) (err error) {
+	user, ok := server.Users[uid]
 	if !ok {
 		return errors.New("Unknown user ID")
 	}
 
 	// Remove from user maps
-	delete(s.Users, uid)
-	delete(s.UserCertMap, user.CertHash)
-	delete(s.UserNameMap, user.Name)
+	delete(server.Users, uid)
+	delete(server.UserCertificateMap, user.CertificateHash)
+	delete(server.UserNameMap, user.Name)
 
 	// Remove from groups and ACLs.
-	s.removeRegisteredUserFromChannel(uid, s.RootChannel())
+	server.removeRegisteredUserFromChannel(uid, server.RootChannel())
 
 	return nil
 }
 
 // Remove references for user id uid from channel. Traverses subchannels.
-func (s *Server) removeRegisteredUserFromChannel(uid uint32, channel *Channel) {
+func (server *Server) removeRegisteredUserFromChannel(uid uint32, channel *Channel) {
 
-	newACL := []acl.ACL{}
-	for _, chanacl := range channel.ACL.ACLs {
-		if chanacl.UserId == int(uid) {
+	newACL := []acl{}
+	for _, channelACL := range channel.ACLs {
+		if channelACL.UserId == uid {
 			continue
 		}
-		newACL = append(newACL, chanacl)
+		newACL = append(newACL, channelACL)
 	}
-	channel.ACL.ACLs = newACL
+	channel.ACLs = newACL
 
-	for _, grp := range channel.ACL.Groups {
-		if _, ok := grp.Add[int(uid)]; ok {
-			delete(grp.Add, int(uid))
+	for _, group := range channel.ACL.Groups {
+		if _, ok := group.Add[uid]; ok {
+			delete(group.Add, uid)
 		}
-		if _, ok := grp.Remove[int(uid)]; ok {
-			delete(grp.Remove, int(uid))
+		if _, ok := group.Remove[uid]; ok {
+			delete(group.Remove, uid)
 		}
-		if _, ok := grp.Temporary[int(uid)]; ok {
-			delete(grp.Temporary, int(uid))
+		if _, ok := group.Temporary[uid]; ok {
+			delete(group.Temporary, uid)
 		}
 	}
 
-	for _, subChan := range channel.children {
-		s.removeRegisteredUserFromChannel(uid, subChan)
+	for _, childChannel := range channel.children {
+		s.removeRegisteredUserFromChannel(uid, childChannel)
 	}
 }
 
 // Remove a channel
 func (server *Server) RemoveChannel(channel *Channel) {
 	// Can't remove root
+	// TODO: Move this to a fucntion that cna be called as a validation, all validations should be their own funcitons to make testing easier
 	if channel == server.RootChannel() {
 		return
 	}
 
 	// Remove all links
 	for _, linkedChannel := range channel.Links {
-		delete(linkedChannel.Links, channel.Id)
+		delete(linkedChannel.Links, channel.ID)
 	}
 
-	// Remove all subchannels
-	for _, subChannel := range channel.children {
-		server.RemoveChannel(subChannel)
+	// TODO: SubChannel or child, lets not mix metaphors!!
+	// Remove all subchannels // TODO: No remove all children, you are iterating over the children not subhcannels
+	for _, child := range channel.children {
+		server.RemoveChannel(child)
 	}
 
 	// Remove all clients
@@ -1173,39 +1201,40 @@ func (server *Server) RemoveChannel(channel *Channel) {
 			target = target.parent
 		}
 
-		userstate := &mumbleproto.UserState{}
-		userstate.Session = proto.Uint32(client.Session())
-		userstate.ChannelId = proto.Uint32(uint32(target.Id))
-		server.userEnterChannel(client, target, userstate)
-		if err := server.broadcastProtoMessage(userstate); err != nil {
+		userState := &mumbleproto.UserState{}
+		userState.Session = client.Session()
+		userState.ChannelID = target.ID
+		server.userEnterChannel(client, target, userState)
+		if err := server.broadcastProtoMessage(userState); err != nil {
 			server.Panicf("%v", err)
 		}
 	}
 
 	// Remove the channel itself
 	parent := channel.parent
-	delete(parent.children, channel.Id)
-	delete(server.Channels, channel.Id)
+	delete(parent.children, channel.ID)
+	delete(server.Channels, channel.ID)
 	chanremove := &mumbleproto.ChannelRemove{
-		ChannelId: proto.Uint32(uint32(channel.Id)),
+		ChannelID: channel.ID,
 	}
-	if err := server.broadcastProtoMessage(chanremove); err != nil {
+	if err := server.broadcastProtoMessage(channelRemove); err != nil {
 		server.Panicf("%v", err)
 	}
 }
 
 // Remove expired bans
 func (server *Server) RemoveExpiredBans() {
-	server.banlock.Lock()
-	defer server.banlock.Unlock()
+	server.banLock.Lock()
+	defer server.banLock.Unlock()
 
-	newBans := []ban.Ban{}
+	newBans := []Ban{}
 	update := false
 	for _, ban := range server.Bans {
-		if !ban.IsExpired() {
-			newBans = append(newBans, ban)
-		} else {
+		// TODO: If not is kinda unwieldly when we can just flip the results
+		if ban.IsExpired() {
 			update = true
+		} else {
+			newBans = append(newBans, ban)
 		}
 	}
 
@@ -1216,12 +1245,15 @@ func (server *Server) RemoveExpiredBans() {
 }
 
 // Is the incoming connection conn banned?
-func (server *Server) IsConnectionBanned(conn net.Conn) bool {
-	server.banlock.RLock()
-	defer server.banlock.RUnlock()
+func (server *Server) IsConnectionBanned(connection net.Conn) bool {
+	// TODO: Potential DOS vector?
+	//server.banLock.RLock()
+	defer server.banLock.RUnlock()
 
+	// TODO: If we don't need the for loop, we can just return the result of the if check instead of returning true or false after checking
+	// Like can we match the IP Addr then check if the ban is expired? if it is shouldn't we be clearing it from the bans slice or DB? it emans we are logging all past bans and searching through them making every ban cause the server to be a little bit slower, looks like a DOS vector
 	for _, ban := range server.Bans {
-		addr := conn.RemoteAddr().(*net.TCPAddr)
+		addr := connection.RemoteAddr().(*net.TCPAddr)
 		if ban.Match(addr.IP) && !ban.IsExpired() {
 			return true
 		}
@@ -1231,12 +1263,13 @@ func (server *Server) IsConnectionBanned(conn net.Conn) bool {
 }
 
 // Is the certificate hash banned?
-func (server *Server) IsCertHashBanned(hash string) bool {
-	server.banlock.RLock()
-	defer server.banlock.RUnlock()
+func (server *Server) IsCertificateHashBanned(hash string) bool {
+	server.banLock.RLock()
+	defer server.banLock.RUnlock()
 
 	for _, ban := range server.Bans {
-		if ban.CertHash == hash && !ban.IsExpired() {
+		// TODO: Hash camparisons should be DeepComparison and not just ==
+		if ban.CertificateHash == hash && !ban.IsExpired() {
 			return true
 		}
 	}
@@ -1247,20 +1280,20 @@ func (server *Server) IsCertHashBanned(hash string) bool {
 // Filter incoming text according to the server's current rules.
 func (server *Server) FilterText(text string) (filtered string, err error) {
 	options := &htmlfilter.Options{
-		StripHTML:             !server.cfg.BoolValue("AllowHTML"),
-		MaxTextMessageLength:  server.cfg.IntValue("MaxTextMessageLength"),
-		MaxImageMessageLength: server.cfg.IntValue("MaxImageMessageLength"),
+		StripHTML:             !server.config.AllowHTML,
+		MaxTextMessageLength:  server.config.MaxTextMessageLength,
+		MaxImageMessageLength: server.config.MaxImageMessageLength,
 	}
-	return htmlfilter.Filter(text, options)
+	return htmlFilter.Filter(text, options)
 }
 
 // The accept loop of the server.
 func (server *Server) acceptLoop() {
-	defer server.netwg.Done()
+	defer server.waitGroup.Done()
 
 	for {
 		// New client connected
-		conn, err := server.tlsl.Accept()
+		connection, err := server.tlsListener.Accept()
 		if err != nil {
 			if isTimeout(err) {
 				continue
@@ -1273,9 +1306,9 @@ func (server *Server) acceptLoop() {
 		server.RemoveExpiredBans()
 
 		// Is the client IP-banned?
-		if server.IsConnectionBanned(conn) {
-			server.Printf("Rejected client %v: Banned", conn.RemoteAddr())
-			err := conn.Close()
+		if server.IsConnectionBanned(connection) {
+			server.Printf("Rejected client %v: Banned", connection.RemoteAddr())
+			err := connection.Close()
 			if err != nil {
 				server.Printf("Unable to close connection: %v", err)
 			}
@@ -1284,7 +1317,7 @@ func (server *Server) acceptLoop() {
 
 		// Create a new client connection from our *tls.Conn
 		// which wraps net.TCPConn.
-		err = server.handleIncomingClient(conn)
+		err = server.handleIncomingClient(connection)
 		if err != nil {
 			server.Printf("Unable to handle new client: %v", err)
 			continue
@@ -1295,6 +1328,7 @@ func (server *Server) acceptLoop() {
 // The isTimeout function checks whether a
 // network error is a timeout.
 func isTimeout(err error) bool {
+	// TODO: No loop, so we can just return the e? It should be true or false?
 	if e, ok := err.(net.Error); ok {
 		return e.Timeout()
 	}
@@ -1303,16 +1337,16 @@ func isTimeout(err error) bool {
 
 // Initialize the per-launch data
 func (server *Server) initPerLaunchData() {
-	server.pool = sessionpool.New()
+	server.pool = sessionPool.New()
 	server.clients = make(map[uint32]*Client)
-	server.hclients = make(map[string][]*Client)
-	server.hpclients = make(map[string]*Client)
+	server.hostClients = make(map[string][]*Client)
+	server.hostnameClients = make(map[string]*Client)
 
 	server.bye = make(chan bool)
 	server.incoming = make(chan *Message)
-	server.voicebroadcast = make(chan *VoiceBroadcast)
-	server.cfgUpdate = make(chan *KeyValuePair)
-	server.tempRemove = make(chan *Channel, 1)
+	server.voiceBroadcast = make(chan *VoiceBroadcast)
+	server.configUpdate = make(chan *KeyValuePair)
+	server.temporaryRemove = make(chan *Channel, 1)
 	server.clientAuthenticated = make(chan *Client)
 }
 
@@ -1320,23 +1354,24 @@ func (server *Server) initPerLaunchData() {
 func (server *Server) cleanPerLaunchData() {
 	server.pool = nil
 	server.clients = nil
-	server.hclients = nil
-	server.hpclients = nil
+	server.hostClients = nil
+	server.hostnameClients = nil
 
 	server.bye = nil
 	server.incoming = nil
-	server.voicebroadcast = nil
-	server.cfgUpdate = nil
-	server.tempRemove = nil
+	server.voiceBroadcast = nil
+	server.configUpdate = nil
+	server.temporaryRemove = nil
 	server.clientAuthenticated = nil
 }
 
 // Returns the port the server will listen on when it is
 // started. Returns 0 on failure.
 func (server *Server) Port() int {
-	port := server.cfg.IntValue("Port")
+	port := server.config.Port
 	if port == 0 {
-		return DefaultPort + int(server.Id) - 1
+		// TODO: What the hell is this? Just use the default port, why is the serverID -1 involved? Set one when defining the server not here
+		return DefaultPort + int(server.ID) - 1
 	}
 	return port
 }
@@ -1344,19 +1379,22 @@ func (server *Server) Port() int {
 // Returns the port the server is currently listning
 // on.  If called when the server is not running,
 // this function returns -1.
+// TODO: Why not use a bool, for a boolean type instead of int?
 func (server *Server) CurrentPort() int {
-	if !server.running {
+	// just return running? insetad of checking it and return?
+	if !server.isRunning {
 		return -1
 	}
-	tcpaddr := server.tcpl.Addr().(*net.TCPAddr)
-	return tcpaddr.Port
+	tcpAddr := server.tcpListener.Addr().(*net.TCPAddr)
+	return tcpAddr.Port
 }
 
 // Returns the host address the server will listen on when
 // it is started. This must be an IP address, either IPv4
 // or IPv6.
 func (server *Server) HostAddress() string {
-	host := server.cfg.StringValue("Address")
+	host := server.config.Address
+	// TODO: Don't set this here!, set it ONCE during fucking initialization, for fucks sake
 	if host == "" {
 		return "0.0.0.0"
 	}
@@ -1369,54 +1407,57 @@ func (server *Server) Start() (err error) {
 		return errors.New("already running")
 	}
 
+	// Remember host+port = hostname
 	host := server.HostAddress()
 	port := server.Port()
 
 	// Setup our UDP listener
-	server.udpconn, err = net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP(host), Port: port})
+	server.udpConnection, err = net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP(host), Port: port})
 	if err != nil {
 		return err
 	}
-	/*
-		err = server.udpconn.SetReadTimeout(1e9)
-		if err != nil {
-			return err
-		}
-	*/
+
+	// TODO: What is this?
+	//err = server.udpConnection.SetReadTimeout(1e9)
+	//if err != nil {
+	//	return err
+	//}
 
 	// Set up our TCP connection
-	server.tcpl, err = net.ListenTCP("tcp", &net.TCPAddr{IP: net.ParseIP(host), Port: port})
+	server.tcpListener, err = net.ListenTCP("tcp", &net.TCPAddr{IP: net.ParseIP(host), Port: port})
 	if err != nil {
 		return err
 	}
-	/*
-		err = server.tcpl.SetTimeout(1e9)
-		if err != nil {
-			return err
-		}
-	*/
+	// TODO: DRY, whenever you repeat smething twice, just make a function, pass in the differneces
+	//err = server.tcpListener.SetTimeout(1e9)
+	//if err != nil {
+	//	return err
+	//}
 
 	// Wrap a TLS listener around the TCP connection
-	certFn := filepath.Join(Args.DataDir, "cert.pem")
-	keyFn := filepath.Join(Args.DataDir, "key.pem")
-	cert, err := tls.LoadX509KeyPair(certFn, keyFn)
+	// TODO: Nooooo this is a library file, not the command! GET OUT ARGS! USE CONFIG!
+	certificateFilename := filepath.Join(server.Config.DataDirectory, "cert.pem")
+	keyFilename := filepath.Join(server.Config.DataDirectory, "key.pem")
+	certificate, err := tls.LoadX509KeyPair(certificateFilename, keyFilename)
 	if err != nil {
 		return err
 	}
-	server.tlscfg = &tls.Config{
-		Certificates: []tls.Certificate{cert},
-		ClientAuth:   tls.RequestClientCert,
+	server.tlsConfig = &tls.Config{
+		Certificates: []tls.Certificate{certificate},
+		ClientAuth:   tls.RequestClientCertificate,
 	}
-	server.tlsl = tls.NewListener(server.tcpl, server.tlscfg)
+	server.tlsListener = tls.NewListener(server.tcpListener, server.tlsConfig)
 
-	server.Printf("Started: listening on %v", server.tcpl.Addr())
-	server.running = true
+	server.Printf("Started: listening on %v", server.tcpListener.Addr())
+	server.running = true // TODO: Something feels really wwierd about this, considering other things are used to check this
 
 	// Open a fresh freezer log
-	err = server.openFreezeLog()
-	if err != nil {
-		server.Fatal(err)
-	}
+	// TODO: Ugghhh why have a separate log file? I dont get it!
+	// TODO: Also why use precious IO over cheap memory? WHATS THE ADVANTAGE!
+	//err = server.openFreezeLog()
+	//if err != nil {
+	//	server.Fatal(err)
+	//}
 
 	// Reset the server's per-launch data to
 	// a clean state.
@@ -1432,11 +1473,12 @@ func (server *Server) Start() (err error) {
 	// for the servers. Each network goroutine defers a call to
 	// netwg.Done(). In the Stop() we close all the connections
 	// and call netwg.Wait() to wait for the goroutines to end.
-	server.netwg.Add(2)
+	server.waitGroup.Add(2)
 	go server.udpListenLoop()
 	go server.acceptLoop()
 
 	// Schedule a server registration update (if needed)
+	// TODO: How about not short poll?
 	go func() {
 		time.Sleep(1 * time.Minute)
 		server.RegisterPublicServer()
@@ -1446,30 +1488,33 @@ func (server *Server) Start() (err error) {
 }
 
 // Stop the server.
-func (server *Server) Stop() (err error) {
-	if !server.running {
+func (self *Server) Stop() (err error) {
+	// TODO: Are thre not better ways to check this instead of a bool that needs to be checked before this can be considered accurate?
+	if !self.isRunning {
 		return errors.New("server not running")
 	}
 
 	// Stop the handler goroutine and disconnect all
 	// clients
+	// TODO: Where is this true comming from???????
 	server.bye <- true
 	for _, client := range server.clients {
 		client.Disconnect()
 	}
 
+	// TODO: Combine these into a closing connection function? These two sets are nearly identical, we could easily avoid repeating it by extracting it into a single function or even 2 lines calling two separate functions
 	// Close the TLS listener and the TCP listener
-	err = server.tlsl.Close()
+	err = server.tlsListener.Close()
 	if err != nil {
 		return err
 	}
-	err = server.tcpl.Close()
+	err = server.tcpListener.Close()
 	if err != nil {
 		return err
 	}
 
 	// Close the UDP connection
-	err = server.udpconn.Close()
+	err = server.udpConnection.Close()
 	if err != nil {
 		return err
 	}
@@ -1477,17 +1522,20 @@ func (server *Server) Stop() (err error) {
 	// Since we'll (on some OSes) have to wait for the network
 	// goroutines to end, we might as well use the time to store
 	// a full server freeze to disk.
-	err = server.FreezeToFile()
-	if err != nil {
-		server.Fatal(err)
-	}
+	// TODO: No, lets not. Lets just do use existing vetted code and get rid of this
+	//err = server.FreezeToFile()
+	//if err != nil {
+	//	server.Fatal(err)
+	//}
 
 	// Wait for the two network receiver
 	// goroutines end.
-	server.netwg.Wait()
+	server.waitGroup.Wait()
 
 	server.cleanPerLaunchData()
-	server.running = false
+	// TODO: Seriously this isn't even confirmed to be true! HOW DO YOU KNOW ITS NOT RUNNING? YOU DIDNT CHECK ANYTHING LOL. if you dont need to check anything? Why eevn set it? something else is giving you this information. exrapolate and save mmemory
+	server.isRunning = false
+	// TODO: Pop this into a consistent single log file, with the ability to add a flag arg to print to screen, idaelly we are making a daemonized server in almost all cases though, so remember that should be the default functionality of a server. almost never in production are we ever running a server not in a daemonized way, so printing to the console should be debug functionality
 	server.Printf("Stopped")
 
 	return nil

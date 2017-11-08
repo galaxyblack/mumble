@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
@@ -68,16 +69,19 @@ func (server *Server) openFreezeLog() error {
 // TODO: Seems like there could be many better ways to do this
 func (server *Server) Freeze() (fs *Server, err error) {
 	fs = new(Server)
-
 	// Freeze all config kv-pairs
-	// TODO: Seriously? Why the fuck are we doing this
+	// TODO: Seriously? Why the fuck are we doing this, this is just wasting memory.
+	// And is there an advtange to use this "freeze" technique at all over just keeping it encrytped
+	// in memory, properly wiping it securely and limiting disk I/O which is always the bottleneck?
+	// If we do want to use a file, why not just use an existing embedded DB and simplify this code?
 	configuration := server.config.GetAll()
-	for k, v := range configuration {
-		fs.config.configMap = append(fs.config, &ConfigKeyValuePair{
+	for key, value := range configuration {
+		fmt.Println("(key, value): ", key, value)
+		//fs.config.configMap = append(fs.config, &ConfigKeyValuePair{
 		// TODO: Maybe just a key/value store thats embedded to write less code that is better?
 		//	Key:   proto.String(k),
 		//	Value: proto.String(v),
-		})
+		//})
 	}
 
 	// Freeze all bans
