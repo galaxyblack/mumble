@@ -2,34 +2,49 @@ package main
 
 import (
 	"flag"
-	"path/filepath"
-	//"text/template"
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"regexp"
 
-	"mumble/pkg/blobstore"
-	"mumble/pkg/logtarget"
+	"mumble/protocol"
 )
+
+type args struct {
+	ShowHelp  bool
+	DataDir   string
+	LogPath   string
+	RegenKeys bool
+	SQLiteDB  string
+	CleanUp   bool
+}
+
+type UsageArgs struct {
+	Version   string
+	BuildDate string
+	OS        string
+	Arch      string
+}
 
 var (
 	version   = "0.1.0"
 	buildDate = "n/a"
-)
+	servers   map[int64]*protocol.Server
+	blobStore protocol.BlobStore
+	Args      args
+	usageTmpl = `usage: mumble [options]
 
-var usageTmpl = `usage: grumble [options]
-
- grumble {{.Version}} ({{.BuildDate}})
+ mumble {{.Version}} ({{.BuildDate}})
  target: {{.OS}}, {{.Arch}}
 
  --help
      Shows this help listing.
 
- --datadir <data-dir> (default: $HOME/.grumble)
+ --datadir <data-dir> (default: $HOME/.mumble)
      Directory to use for server storage.
 
- --log <log-path> (default: $DATADIR/grumble.log)
+ --log <log-path> (default: $DATADIR/mumble.log)
      Log file path.
 
  --regen-keys
@@ -46,38 +61,63 @@ var usageTmpl = `usage: grumble [options]
      clean up its data directory when doing the
      import. This is *DESTRUCTIVE*! Use with care.
 `
+)
 
-var servers map[int64]*Server
-var blobStore blobstore.BlobStore
-
-type args struct {
-	ShowHelp  bool
-	DataDir   string
-	LogPath   string
+func defaultDataDir() string {
+	// TODO: This is actually no longer the preferred location
+	// it should be in .local/config/mumble
+	dirname := ".local/config/mumble"
+	return filepath.Join(os.Getenv("HOME"), dirname)
 }
 
-type UsageArgs struct {
-	Version   string
-	BuildDate string
-	OS        string
-	Arch      string
+func defaultLogPath() string {
+	return filepath.Join(defaultDataDir(), "mumble.log")
+}
+
+func Usage() {
+	t, err := template.New("usage").Parse(usageTmpl)
+	if err != nil {
+		panic("unable to parse usage template")
+	}
+
+	err = t.Execute(os.Stdout, UsageArgs{
+		Version:   version,
+		BuildDate: buildDate,
+		OS:        runtime.GOOS,
+		Arch:      runtime.GOARCH,
+	})
+	if err != nil {
+		panic("unable to execute usage template")
+	}
+}
+
+func init() {
+	flag.Usage = Usage
+
+	flag.BoolVar(&Args.ShowHelp, "help", false, "")
+	flag.StringVar(&Args.DataDir, "datadir", defaultDataDir(), "")
+	flag.StringVar(&Args.LogPath, "log", defaultLogPath(), "")
+	flag.BoolVar(&Args.RegenKeys, "regen-keys", false, "")
+
+	flag.StringVar(&Args.SQLiteDB, "import-murmurdb", "", "")
+	flag.BoolVar(&Args.CleanUp, "cleanup", false, "")
 }
 
 func main() {
 	var err error
 
 	flag.Parse()
-	if args.ShowHelp == true {
+	if Args.ShowHelp == true {
 		Usage()
 		return
 	}
 
 	// Open the data dir to check whether it exists.
-	if _, err := os.Stat(args.DataDir); os.IsNotExist(err) {
-		os.Mkdir(args.DataDir, 600)
+	if _, err := os.Stat(Args.DataDir); os.IsNotExist(err) {
+		os.Mkdir(Args.DataDir, 600)
 	}
 
-	dataDir, err := os.Open(args.DataDir)
+	dataDir, err := os.Open(Args.DataDir)
 	if err != nil {
 		// TODO: Perhaps just create the folder instead of erroring out?
 		// Well this should be impossible now
@@ -87,16 +127,16 @@ func main() {
 	dataDir.Close()
 
 	// Set up logging
-	err = logtarget.Target.OpenFile(args.LogPath)
+	err = logtarget.Target.OpenFile(Args.LogPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Unable to open log file: %v", err)
 		return
 	}
-	log.SetPrefix("[G] ")
+	log.SetPrefix("[M] ")
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 	log.SetOutput(&logtarget.Target)
-	log.Printf("Grumble")
-	log.Printf("Using data directory: %s", args.DataDir)
+	log.Printf("Mumble")
+	log.Printf("Using data directory: %s", Args.DataDir)
 
 	// Open the blobstore.  If the directory doesn't
 	// already exist, create the directory and open
@@ -104,7 +144,7 @@ func main() {
 	// The Open method of the blobstore performs simple
 	// sanity checking of content of the blob directory,
 	// and will return an error if something's amiss.
-	blobDir := filepath.Join(args.DataDir, "blob")
+	blobDir := filepath.Join(Args.DataDir, "blob")
 	err = os.Mkdir(blobDir, 0700)
 	if err != nil && !os.IsExist(err) {
 		log.Fatalf("Unable to create blob directory: %v", err)
@@ -116,10 +156,10 @@ func main() {
 	// These are used as the default certificate of all virtual servers
 	// and the SSH admin console, but can be overridden using the "key"
 	// and "cert" arguments to Grumble.
-	certFn := filepath.Join(args.DataDir, "cert.pem")
-	keyFn := filepath.Join(args.DataDir, "key.pem")
+	certFn := filepath.Join(Args.DataDir, "cert.pem")
+	keyFn := filepath.Join(Args.DataDir, "key.pem")
 	shouldRegen := false
-	if args.RegenKeys {
+	if Args.RegenKeys {
 		shouldRegen = true
 	} else {
 		// OK. Here's the idea:  We check for the existence of the cert.pem
@@ -139,11 +179,13 @@ func main() {
 		if !hasCert && !hasKey {
 			shouldRegen = true
 		} else if !hasCert || !hasKey {
+			//# TODO: Probably should be using ACME/letsencrypt since there is a lot of
+			//# iterations that dont even have dependencies
 			if !hasCert {
-				log.Fatal("Grumble could not find its default certificate (cert.pem)")
+				log.Fatal("Mumble could not find its default certificate (cert.pem)")
 			}
 			if !hasKey {
-				log.Fatal("Grumble could not find its default private key (key.pem)")
+				log.Fatal("Mumble could not find its default private key (key.pem)")
 			}
 		}
 	}
@@ -161,8 +203,8 @@ func main() {
 	}
 
 	// Should we import data from a Murmur SQLite file?
-	if SQLiteSupport && len(args.SQLiteDB) > 0 {
-		f, err := os.Open(args.DataDir)
+	if SQLiteSupport && len(Args.SQLiteDB) > 0 {
+		f, err := os.Open(Args.DataDir)
 		if err != nil {
 			log.Fatalf("Murmur import failed: %s", err.Error())
 		}
@@ -173,32 +215,32 @@ func main() {
 			log.Fatalf("Murmur import failed: %s", err.Error())
 		}
 
-		if !args.CleanUp && len(names) > 0 {
+		if !Args.CleanUp && len(names) > 0 {
 			log.Fatalf("Non-empty datadir. Refusing to import Murmur data.")
 		}
-		if args.CleanUp {
+		if Args.CleanUp {
 			log.Print("Cleaning up existing data directory")
 			for _, name := range names {
-				if err := os.RemoveAll(filepath.Join(args.DataDir, name)); err != nil {
+				if err := os.RemoveAll(filepath.Join(Args.DataDir, name)); err != nil {
 					log.Fatalf("Unable to cleanup file: %s", name)
 				}
 			}
 		}
 
-		log.Printf("Importing Murmur data from '%s'", args.SQLiteDB)
-		if err = MurmurImport(args.SQLiteDB); err != nil {
+		log.Printf("Importing Murmur data from '%s'", Args.SQLiteDB)
+		if err = MurmurImport(Args.SQLiteDB); err != nil {
 			log.Fatalf("Murmur import failed: %s", err.Error())
 		}
 
 		log.Printf("Import from Murmur SQLite database succeeded.")
-		log.Printf("Please restart Grumble to make use of the imported data.")
+		log.Printf("Please restart Mumble to make use of the imported data.")
 
 		return
 	}
 
 	// Create the servers directory if it doesn't already
 	// exist.
-	serversDirPath := filepath.Join(args.DataDir, "servers")
+	serversDirPath := filepath.Join(Args.DataDir, "servers")
 	err = os.Mkdir(serversDirPath, 0700)
 	if err != nil && !os.IsExist(err) {
 		log.Fatalf("Unable to create servers directory: %v", err)
