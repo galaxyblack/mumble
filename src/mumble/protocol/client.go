@@ -18,20 +18,23 @@ import (
 )
 
 // A client connection
+// TODO: Client validations should be going in this module, and tested individually, keep it dry and simple for testing
 type Client struct {
 	// Logging
 	*log.Logger
-	lf *clientLogForwarder
+
+	// TODO: What is a log forwarder? Can it be replaced and this module simplified by just using existing logging library that is community maintained? Lets focus on what makes this DIFFERENt isntead of remaking every wheel worse than the community maintained libraries
+	logForwarder *LogForwarder
 
 	// Connection-related
-	tcpaddr *net.TCPAddr
-	udpaddr *net.UDPAddr
-	conn    net.Conn
-	reader  *bufio.Reader
-	state   int
-	server  *Server
+	tcpAddr    *net.TCPAddr
+	udpAddr    *net.UDPAddr
+	connection net.Conn
+	reader     *bufio.Reader
+	state      int
+	server     *Server
 
-	udprecv chan []byte
+	udpReceive chan []byte
 
 	disconnected bool
 
@@ -43,6 +46,7 @@ type Client struct {
 	voiceTargets map[uint32]*VoiceTarget
 
 	// Ping stats
+	// TODO: Good candidate for a nested struct, it even has a name
 	UdpPingAvg float32
 	UdpPingVar float32
 	UdpPackets uint32
@@ -62,6 +66,7 @@ type Client struct {
 	clientReady chan bool
 
 	// Version
+	// TODO: Good candidate for a nested struct, it even has a name
 	Version    uint32
 	ClientName string
 	OSName     string
@@ -69,6 +74,7 @@ type Client struct {
 	CryptoMode string
 
 	// Personal
+	// TODO: Good candidate for a nested struct, it even has a name
 	Username        string
 	session         uint32
 	certHash        string
@@ -87,34 +93,40 @@ type Client struct {
 }
 
 // Debugf implements debug-level printing for Clients.
+// TODO: Seems like this should be isolated into a debug/log module and not reimplemented in each and every datatype. Nicht so DRY
 func (client *Client) Debugf(format string, v ...interface{}) {
 	client.Printf(format, v...)
 }
 
 // Is the client a registered user?
+// TODO: Doesn't seem like the appropriate way to do this check, we only check if the struct has the value set and not if the server has the user registered? Seems totally wrong and not actually checking what the fucntion name is implying
 func (client *Client) IsRegistered() bool {
 	return client.user != nil
 }
 
 // Does the client have a certificate?
+// TODO: Should this not be a failure implemented as a validation and returning an error?
 func (client *Client) HasCertificate() bool {
-	return len(client.certHash) > 0
+	return len(client.certificateHash) > 0
 }
 
 // Is the client the SuperUser?
 func (client *Client) IsSuperUser() bool {
+	// TODO: This is repated from earlier, so its definitely needed as a implmeneted as a validation function. Diese is nicht so dry
 	if client.user == nil {
 		return false
 	}
+	// TODO: Only 1 super user allowed using this method, doesn't seem that flexible, Maybe if we add an attribute or create a user DB, we can actually have roles =p
 	return client.user.ID == 0
+
 }
 
 func (client *Client) ACLContext() *acl {
 	return &client.Channel.ACL
 }
 
-func (client *Client) CertHash() string {
-	return client.certHash
+func (client *Client) CertificateHash() string {
+	return client.certificateHash
 }
 
 func (client *Client) Session() uint32 {
@@ -128,14 +140,18 @@ func (client *Client) Tokens() []string {
 // Get the User ID of this client.
 // Returns -1 if the client is not a registered user.
 func (client *Client) UserID() int {
+	// TODO: Third fucking time we did this check, come on, lets make validating functions and use them for consistent functionality, smaller code footprint and easier testing!
 	if client.user == nil {
+		// TODO: No, lets not plz
 		return -1
 	}
+	// TODO: Seriously why are we returning it as an int? Just use a bool and only have uints32 so we dont convert 500 times
 	return int(client.user.ID)
 }
 
 // Get the client's shown name.
 func (client *Client) ShownName() string {
+	// TODO: Why are we hardcoding the admin accounts names? Seems dirty and not flexible. Dont do this, just have the first user that registers be an admin and have it be a role so others can apply
 	if client.IsSuperUser() {
 		return "SuperUser"
 	}
