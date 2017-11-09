@@ -103,7 +103,7 @@ func (acl *acl) IsChannelACL() bool {
 
 // HasPermission checks whether the given user has permission perm in the given context.
 // The permission perm must be a single permission and not a combination of permissions.
-func HasPermission(ctx *Context, user User, perm Permission) bool {
+func (acl acl) HasPermission(ctx *Context, user User, perm Permission) bool {
 	// We can't check permissions on a nil ctx.
 	if ctx == nil {
 		panic("acl: HasPermission got nil context")

@@ -19,6 +19,8 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
+
+	"mumble/protocol/mumbleproto"
 )
 
 // The default port a Murmur server listens on
@@ -62,7 +64,8 @@ type Server struct {
 	incoming       chan *Message
 	voiceBroadcast chan *VoiceBroadcast
 	configUpdate   chan *KeyValuePair
-	tempRemove     chan *Channel
+	// TODO: What? Can't be needed
+	tempRemove chan *Channel
 
 	// Signals to the server that a client has been successfully
 	// authenticated.
@@ -1131,6 +1134,7 @@ func (server *Server) RegisterClient(client *Client) (uid uint32, err error) {
 // Remove a registered user.
 func (server *Server) RemoveRegistration(uid uint32) (err error) {
 	user, ok := server.Users[uid]
+	// TODO: No, don't ok, use error then return that fucking error, fucks sake
 	if !ok {
 		return errors.New("Unknown user ID")
 	}
@@ -1146,9 +1150,8 @@ func (server *Server) RemoveRegistration(uid uint32) (err error) {
 	return nil
 }
 
-// Remove references for user id uid from channel. Traverses subchannels.
+// Remove references for user id uid from channel. Traverses childChannels.
 func (server *Server) removeRegisteredUserFromChannel(uid uint32, channel *Channel) {
-
 	newACL := []acl{}
 	for _, channelACL := range channel.ACLs {
 		if channelACL.UserId == uid {

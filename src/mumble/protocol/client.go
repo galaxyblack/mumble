@@ -76,9 +76,10 @@ type Client struct {
 	// Personal
 	// TODO: Good candidate for a nested struct, it even has a name
 	// Also lets isolate out the public and private so its easier to read
-	Username        string
-	Email           string
-	Channel         *Channel
+	Username string
+	Email    string
+	Channel  *Channel
+	Context
 	SelfMute        bool
 	SelfDeaf        bool
 	Mute            bool
@@ -243,6 +244,7 @@ func (client *Client) RejectAuth(rejectType mumbleproto.Reject_RejectType, reaso
 
 // Read a protobuf message from a client
 func (client *Client) readProtocolMessage() (message *Message, err error) {
+	// TODO: Put this in the struct!!!!!!!
 	var (
 		length uint32
 		kind   uint16
@@ -260,14 +262,15 @@ func (client *Client) readProtocolMessage() (message *Message, err error) {
 		return
 	}
 
-	buf := make([]byte, length)
-	_, err = io.ReadFull(client.reader, buf)
+	buffer := make([]byte, length)
+	_, err = io.ReadFull(client.reader, buffer)
 	if err != nil {
 		return
 	}
 
+	// TODO: Break up this logic!
 	message = &Message{
-		buf:    buf,
+		buffer: buffer,
 		kind:   kind,
 		client: client,
 	}

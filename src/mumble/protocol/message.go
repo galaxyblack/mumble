@@ -8,26 +8,30 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
+
+	"mumble/protocol/mumbleproto"
 )
 
+//TODO: IF YOU ARE WORKING ON A FUCKING 1K+ LINE FILE. STOP AND BREAK THAT SHIT UP, good place to start? Look at your variety of structs, those can each be isolated into thier own file so all the functions in that file relate to that fucking struct. Its like a model in rails, and it makes code actually manageable by other developers and saves EVERYONE time and lets us contribute in meaningful ways without wasting anyones time
 type Message struct {
-	buf    []byte
+	buffer []byte
 	kind   uint16
 	client *Client
 }
 
+// TODO: Is this better in Client or Voice/Broadcast module within this package?
 type VoiceBroadcast struct {
 	// The client who is performing the broadcast
 	client *Client
 	// The VoiceTarget identifier.
 	target byte
 	// The voice packet itself.
-	buf []byte
+	buffer []byte
 }
 
-func (server *Server) handleCryptSetup(client *Client, msg *Message) {
-	cs := &mumbleproto.CryptSetup{}
-	err := proto.Unmarshal(msg.buf, cs)
+func (server *Server) handleCryptSetup(client *Client, message *Message) {
+	cryptSetup := &mumbleproto.CryptSetup{}
+	err := proto.Unmarshal(message.buffer, cryptSetup)
 	if err != nil {
 		client.Panic(err)
 		return
@@ -35,30 +39,33 @@ func (server *Server) handleCryptSetup(client *Client, msg *Message) {
 
 	// No client nonce. This means the client
 	// is requesting that we re-sync our nonces.
-	if len(cs.ClientNonce) == 0 {
+	// TODO: checking empty by counting more than 0/1? Waste of cpu
+	if len(cryptSetup.ClientNonce) == 0 {
 		client.Printf("Requested crypt-nonce resync")
-		cs.ClientNonce = make([]byte, aes.BlockSize)
-		if copy(cs.ClientNonce, client.crypt.EncryptIV[0:]) != aes.BlockSize {
+		cryptSetup.ClientNonce = make([]byte, aes.BlockSize)
+		if copy(cryptSetup.ClientNonce, client.crypt.EncryptIV[0:]) != aes.BlockSize {
 			return
 		}
-		client.sendMessage(cs)
+		client.sendMessage(cryptSetup)
 	} else {
 		client.Printf("Received client nonce")
-		if len(cs.ClientNonce) != aes.BlockSize {
+		// TODO: checking empty by counting more than 0/1? Waste of cpu
+		if len(cryptSetup.ClientNonce) != aes.BlockSize {
 			return
 		}
 
 		client.crypt.Resync += 1
-		if copy(client.crypt.DecryptIV[0:], cs.ClientNonce) != aes.BlockSize {
+		if copy(client.crypt.DecryptIV[0:], cryptSetup.ClientNonce) != aes.BlockSize {
 			return
 		}
 		client.Printf("Crypt re-sync successful")
 	}
 }
 
-func (server *Server) handlePingMessage(client *Client, msg *Message) {
+// TODO: Not very DRY, lots of room for improvement ehre
+func (server *Server) handlePingMessage(client *Client, message *Message) {
 	ping := &mumbleproto.Ping{}
-	err := proto.Unmarshal(msg.buf, ping)
+	err := proto.Unmarshal(message.buffer, ping)
 	if err != nil {
 		client.Panic(err)
 		return
@@ -106,52 +113,53 @@ func (server *Server) handlePingMessage(client *Client, msg *Message) {
 	})
 }
 
-func (server *Server) handleChannelRemoveMessage(client *Client, msg *Message) {
-	chanremove := &mumbleproto.ChannelRemove{}
-	err := proto.Unmarshal(msg.buf, chanremove)
+func (server *Server) handleChannelRemoveMessage(client *Client, message *Message) {
+	channelRemove := &mumbleproto.ChannelRemove{}
+	err := proto.Unmarshal(message.buffer, channelRemove)
 	if err != nil {
 		client.Panic(err)
 		return
 	}
 
-	if chanremove.ChannelId == nil {
+	if channelRemove.ChannelID == nil {
 		return
 	}
 
-	channel, exists := server.Channels[int(*chanremove.ChannelId)]
+	channel, exists := server.Channels[int(*channelRemove.ChannelID)]
 	if !exists {
 		return
 	}
 
-	if !acl.HasPermission(&channel.ACL, client, acl.WritePermission) {
-		client.sendPermissionDenied(client, channel, acl.WritePermission)
-		return
-	}
+	//if *(&channel.ACL.HasPermission(client.Context, client, acl.WritePermission)) {
+	//	client.sendPermissionDenied(client, channel, acl.WritePermission)
+	//	return
+	//}
 
 	// Update datastore
-	if !channel.IsTemporary() {
-		server.DeleteFrozenChannel(channel)
-	}
+	//if !channel.IsTemporary() {
+	//	server.DeleteFrozenChannel(channel)
+	//}
 
 	server.RemoveChannel(channel)
 }
 
 // Handle channel state change.
-func (server *Server) handleChannelStateMessage(client *Client, msg *Message) {
-	chanstate := &mumbleproto.ChannelState{}
-	err := proto.Unmarshal(msg.buf, chanstate)
+func (server *Server) handleChannelStateMessage(client *Client, message *Message) {
+	channelState := &mumbleproto.ChannelState{}
+	err := proto.Unmarshal(message.buffer, channelState)
 	if err != nil {
 		client.Panic(err)
 		return
 	}
 
+	// TODO: This feels like it belongs in a struct, not just loose as a local variable...
 	var channel *Channel
 	var parent *Channel
 	var ok bool
 
 	// Lookup channel for channel ID
-	if chanstate.ChannelId != nil {
-		channel, ok = server.Channels[int(*chanstate.ChannelId)]
+	if channelState.ChannelID != nil {
+		channel, ok = server.Channels[int(*channelState.ChannelID)]
 		if !ok {
 			client.Panic("Invalid channel specified in ChannelState message")
 			return
@@ -159,8 +167,9 @@ func (server *Server) handleChannelStateMessage(client *Client, msg *Message) {
 	}
 
 	// Lookup parent
-	if chanstate.Parent != nil {
-		parent, ok = server.Channels[int(*chanstate.Parent)]
+	if channelState.Parent != nil {
+		parent, ok = server.Channels[int(*channelState.Parent)]
+		// TODO: Ok should be err, and provide the fucking string, god damn
 		if !ok {
 			client.Panic("Invalid parent channel specified in ChannelState message")
 			return
@@ -171,14 +180,15 @@ func (server *Server) handleChannelStateMessage(client *Client, msg *Message) {
 	// because clients are supposed to send modifications to a channel's link state through
 	// the links_add and links_remove fields.
 	// Make sure the links field is clear so we can transmit the channel's link state in our reply.
-	chanstate.Links = nil
+	channelState.Links = nil
 
+	// TODO: this cant be right and the function is way too long
 	var name string
 	var description string
 
 	// Extract the description and perform sanity checks.
-	if chanstate.Description != nil {
-		description, err = server.FilterText(*chanstate.Description)
+	if channelState.Description != nil {
+		description, err = server.FilterText(*channelState.Description)
 		if err != nil {
 			client.sendPermissionDeniedType(mumbleproto.PermissionDenied_TextTooLong)
 			return
@@ -190,21 +200,24 @@ func (server *Server) handleChannelStateMessage(client *Client, msg *Message) {
 	//  a) Isn't already used by a channel at the same level as the channel itself (that is, channels
 	//     that have a common parent can't have the same name.
 	//  b) A name must be a valid name on the server (it must pass the channel name regexp)
-	if chanstate.Name != nil {
-		name = *chanstate.Name
+	if channelState.Name != nil {
+		name = *channelState.Name
 
+		// TODO: Why not? and this is a poor way to check and each valdiation should be in its own function
 		// We don't allow renames for the root channel.
-		if channel != nil && channel.Id != 0 {
+		if channel != nil && channel.ID != 0 {
 			// Pick a parent. If the name change is part of a re-parent (a channel move),
 			// we must evaluate the parent variable. Since we're explicitly exlcuding the root
 			// channel from renames, channels that are the target of renames are guaranteed to have
 			// a parent.
-			evalp := parent
-			if evalp == nil {
-				evalp = channel.parent
+			channelParent := parent
+			// TODO: Really why not just check parent?
+			if channelParent == nil {
+				channelParent = channel.parent
 			}
-			for _, iter := range evalp.children {
-				if iter.Name == name {
+			for _, childChannel := range channelParent.children {
+				// TODO: No, this is not the thing you should be doing...
+				if childChannel.Name == name {
 					client.sendPermissionDeniedType(mumbleproto.PermissionDenied_ChannelName)
 					return
 				}
@@ -214,21 +227,23 @@ func (server *Server) handleChannelStateMessage(client *Client, msg *Message) {
 
 	// If the channel does not exist already, the ChannelState message is a create operation.
 	if channel == nil {
+		// TODO: Lets not waste CPU counting past 0 when checking lenght of a string yah?
 		if parent == nil || len(name) == 0 {
 			return
 		}
 
+		// TODO: Nope
 		// Check whether the client has permission to create the channel in parent.
-		perm := acl.Permission(acl.NonePermission)
-		if *chanstate.Temporary {
-			perm = acl.Permission(acl.TempChannelPermission)
-		} else {
-			perm = acl.Permission(acl.MakeChannelPermission)
-		}
-		if !acl.HasPermission(&parent.ACL, client, perm) {
-			client.sendPermissionDenied(client, parent, perm)
-			return
-		}
+		//permission := acl.Permission(acl.NonePermission)
+		//if *channelState.Temporary {
+		//	permission = acl.Permission(acl.TempChannelPermission)
+		//} else {
+		//	permission = acl.Permission(acl.MakeChannelPermission)
+		//}
+		//if !acl.HasPermission(&parent.ACL, client, permission) {
+		//	client.sendPermissionDenied(client, parent, permission)
+		//	return
+		//}
 
 		// Only registered users can create channels.
 		if !client.IsRegistered() && !client.HasCertificate() {
@@ -244,7 +259,7 @@ func (server *Server) handleChannelStateMessage(client *Client, msg *Message) {
 
 		key := ""
 		if len(description) > 0 {
-			key, err = blobStore.Put([]byte(description))
+			key, err = BlobStorePut([]byte(description))
 			if err != nil {
 				server.Panicf("Blobstore error: %v", err)
 			}
@@ -260,7 +275,7 @@ func (server *Server) handleChannelStateMessage(client *Client, msg *Message) {
 		// Add the creator to the channel's admin group
 		if client.IsRegistered() {
 			grp := acl.EmptyGroupWithName("admin")
-			grp.Add[client.UserId()] = true
+			grp.Add[client.UserID()] = true
 			channel.ACL.Groups["admin"] = grp
 		}
 
@@ -271,7 +286,7 @@ func (server *Server) handleChannelStateMessage(client *Client, msg *Message) {
 			aclEntry.ApplyHere = true
 			aclEntry.ApplySubs = true
 			if client.IsRegistered() {
-				aclEntry.UserId = client.UserId()
+				aclEntry.UserID = client.UserID()
 			} else {
 				aclEntry.Group = "$" + client.CertHash()
 			}
@@ -283,7 +298,7 @@ func (server *Server) handleChannelStateMessage(client *Client, msg *Message) {
 			server.ClearCaches()
 		}
 
-		chanstate.ChannelId = proto.Uint32(uint32(channel.Id))
+		chanstate.ChannelID = proto.Uint32(channel.ID)
 
 		// Broadcast channel add
 		server.broadcastProtoMessageWithPredicate(chanstate, func(client *Client) bool {
@@ -303,7 +318,7 @@ func (server *Server) handleChannelStateMessage(client *Client, msg *Message) {
 		if channel.IsTemporary() {
 			userstate := &mumbleproto.UserState{}
 			userstate.Session = proto.Uint32(client.Session())
-			userstate.ChannelId = proto.Uint32(uint32(channel.Id))
+			userstate.ChannelID = proto.Uint32(channel.ID)
 			server.userEnterChannel(client, channel, userstate)
 			server.broadcastProtoMessage(userstate)
 		}
@@ -315,7 +330,7 @@ func (server *Server) handleChannelStateMessage(client *Client, msg *Message) {
 		if chanstate.Name != nil {
 			// The client can only rename the channel if it has WritePermission in the channel.
 			// Also, clients cannot change the name of the root channel.
-			if !acl.HasPermission(&channel.ACL, client, acl.WritePermission) || channel.Id == 0 {
+			if !acl.HasPermission(&channel.ACL, client, acl.WritePermission) || channel.ID == 0 {
 				client.sendPermissionDenied(client, channel, acl.WritePermission)
 				return
 			}
@@ -392,13 +407,13 @@ func (server *Server) handleChannelStateMessage(client *Client, msg *Message) {
 			}
 			// Add any valid channels to linkremove slice
 			for _, cid := range chanstate.LinksRemove {
-				if iter, ok := server.Channels[int(cid)]; ok {
+				if iter, ok := server.Channels[uint32(cid)]; ok {
 					linkremove = append(linkremove, iter)
 				}
 			}
 			// Add any valid channels to linkadd slice
 			for _, cid := range chanstate.LinksAdd {
-				if iter, ok := server.Channels[int(cid)]; ok {
+				if iter, ok := server.Channels[uint32(cid)]; ok {
 					if !acl.HasPermission(&iter.ACL, client, acl.LinkChannelPermission) {
 						client.sendPermissionDenied(client, iter, acl.LinkChannelPermission)
 						return
@@ -522,7 +537,7 @@ func (server *Server) handleUserRemoveMessage(client *Client, msg *Message) {
 		server.banlock.Unlock()
 	}
 
-	userremove.Actor = proto.Uint32(uint32(client.Session()))
+	userremove.Actor = proto.Uint32(client.Session())
 	if err = server.broadcastProtoMessage(userremove); err != nil {
 		server.Panicf("Unable to broadcast UserRemove message")
 		return
@@ -538,9 +553,9 @@ func (server *Server) handleUserRemoveMessage(client *Client, msg *Message) {
 }
 
 // Handle user state changes
-func (server *Server) handleUserStateMessage(client *Client, msg *Message) {
-	userstate := &mumbleproto.UserState{}
-	err := proto.Unmarshal(msg.buf, userstate)
+func (server *Server) handleUserStateMessage(client *Client, message *Message) {
+	userState := &mumbleproto.UserState{}
+	err := proto.Unmarshal(message.buffer, userState)
 	if err != nil {
 		client.Panic(err)
 		return
@@ -552,21 +567,21 @@ func (server *Server) handleUserStateMessage(client *Client, msg *Message) {
 		return
 	}
 	target := actor
-	if userstate.Session != nil {
-		target, ok = server.clients[*userstate.Session]
+	if userState.Session != nil {
+		target, ok = server.clients[*userState.Session]
 		if !ok {
 			client.Panic("Invalid session in UserState message")
 			return
 		}
 	}
 
-	userstate.Session = proto.Uint32(target.Session())
-	userstate.Actor = proto.Uint32(actor.Session())
+	userState.Session = proto.Uint32(target.Session())
+	userState.Actor = proto.Uint32(actor.Session())
 
 	// Does it have a channel ID?
-	if userstate.ChannelId != nil {
+	if userState.ChannelID != nil {
 		// Destination channel
-		dstChan, ok := server.Channels[int(*userstate.ChannelId)]
+		dstChan, ok := server.Channels[uint32(*userState.ChannelID)]
 		if !ok {
 			return
 		}
@@ -585,7 +600,8 @@ func (server *Server) handleUserStateMessage(client *Client, msg *Message) {
 			return
 		}
 
-		maxChannelUsers := server.cfg.IntValue("MaxChannelUsers")
+		// TODO: Since its already in the server config, no need for local variable
+		maxChannelUsers := server.config.MaxChannelUsers
 		if maxChannelUsers != 0 && len(dstChan.clients) >= maxChannelUsers {
 			client.sendPermissionDeniedFallback(mumbleproto.PermissionDenied_ChannelFull,
 				0x010201, "Channel is full")
@@ -593,7 +609,7 @@ func (server *Server) handleUserStateMessage(client *Client, msg *Message) {
 		}
 	}
 
-	if userstate.Mute != nil || userstate.Deaf != nil || userstate.Suppress != nil || userstate.PrioritySpeaker != nil {
+	if userState.Mute != nil || userState.Deaf != nil || userState.Suppress != nil || userState.PrioritySpeaker != nil {
 		// Disallow for SuperUser
 		if target.IsSuperUser() {
 			client.sendPermissionDeniedType(mumbleproto.PermissionDenied_SuperUser)
@@ -607,15 +623,15 @@ func (server *Server) handleUserStateMessage(client *Client, msg *Message) {
 		}
 
 		// Check if this was a suppress operation. Only the server can suppress users.
-		if userstate.Suppress != nil {
+		if userState.Suppress != nil {
 			client.sendPermissionDenied(actor, target.Channel, acl.MuteDeafenPermission)
 			return
 		}
 	}
 
 	// Comment set/clear
-	if userstate.Comment != nil {
-		comment := *userstate.Comment
+	if userState.Comment != nil {
+		comment := *userState.Comment
 
 		// Clearing another user's comment.
 		if target != actor {
@@ -640,20 +656,21 @@ func (server *Server) handleUserStateMessage(client *Client, msg *Message) {
 			return
 		}
 
-		userstate.Comment = proto.String(filtered)
+		userState.Comment = proto.String(filtered)
 	}
 
 	// Texture change
-	if userstate.Texture != nil {
-		maximg := server.cfg.IntValue("MaxImageMessageLength")
-		if maximg > 0 && len(userstate.Texture) > maximg {
+	if userState.Texture != nil {
+		// TODO: Since its already in the config, no need for local variable
+		maxImageLength := server.config.MaxImageMessageLength
+		if maxImageLength > 0 && len(userState.Texture) > maxImageLength {
 			client.sendPermissionDeniedType(mumbleproto.PermissionDenied_TextTooLong)
 			return
 		}
 	}
 
 	// Registration
-	if userstate.UserId != nil {
+	if userState.UserID != nil {
 		// If user == actor, check for SelfRegisterPermission on root channel.
 		// If user != actor, check for RegisterPermission permission on root channel.
 		perm := acl.Permission(acl.RegisterPermission)
@@ -682,7 +699,7 @@ func (server *Server) handleUserStateMessage(client *Client, msg *Message) {
 	//      - PluginContext
 	//      - PluginIdentity
 	//      - Recording
-	if actor != target && (userstate.SelfDeaf != nil || userstate.SelfMute != nil ||
+	if actor != target && (userState.SelfDeaf != nil || userState.SelfMute != nil ||
 		userstate.Texture != nil || userstate.PluginContext != nil || userstate.PluginIdentity != nil ||
 		userstate.Recording != nil) {
 		client.Panic("Invalid UserState")
@@ -879,9 +896,9 @@ func (server *Server) handleUserStateMessage(client *Client, msg *Message) {
 	}
 }
 
-func (server *Server) handleBanListMessage(client *Client, msg *Message) {
+func (server *Server) handleBanListMessage(client *Client, message *Message) {
 	banlist := &mumbleproto.BanList{}
-	err := proto.Unmarshal(msg.buf, banlist)
+	err := proto.Unmarshal(message.buffer, banlist)
 	if err != nil {
 		client.Panic(err)
 		return
@@ -947,9 +964,9 @@ func (server *Server) handleBanListMessage(client *Client, msg *Message) {
 }
 
 // Broadcast text messages
-func (server *Server) handleTextMessage(client *Client, msg *Message) {
+func (server *Server) handleTextMessage(client *Client, message *Message) {
 	txtmsg := &mumbleproto.TextMessage{}
-	err := proto.Unmarshal(msg.buf, txtmsg)
+	err := proto.Unmarshal(message.buffer, textMessage)
 	if err != nil {
 		client.Panic(err)
 		return
@@ -1018,129 +1035,141 @@ func (server *Server) handleTextMessage(client *Client, msg *Message) {
 }
 
 // ACL set/query
-func (server *Server) handleAclMessage(client *Client, msg *Message) {
-	pacl := &mumbleproto.ACL{}
-	err := proto.Unmarshal(msg.buf, pacl)
+func (server *Server) handleAclMessage(client *Client, message *Message) {
+	acl := &mumbleproto.ACL{}
+	err := proto.Unmarshal(message.buffer, acl)
 	if err != nil {
 		client.Panic(err)
 		return
 	}
 
 	// Look up the channel this ACL message operates on.
-	channel, ok := server.Channels[int(*pacl.ChannelId)]
+	channel, ok := server.Channels[int(*acl.ChannelID)]
+	// TODO: return errors, so you can display them! This ok shit is not ok
 	if !ok {
 		return
 	}
 
 	// Does the user have permission to update or look at ACLs?
-	if !acl.HasPermission(&channel.ACL, client, acl.WritePermission) && !(channel.parent != nil && acl.HasPermission(&channel.parent.ACL, client, acl.WritePermission)) {
+	if !acl.HasPermission(&channel.acl, client, acl.WritePermission) && !(channel.parent != nil && acl.HasPermission(&channel.parent.acl, client, acl.WritePermission)) {
 		client.sendPermissionDenied(client, channel, acl.WritePermission)
 		return
 	}
 
 	reply := &mumbleproto.ACL{}
-	reply.ChannelId = proto.Uint32(uint32(channel.Id))
+	reply.ChannelId = channel.ID
 
 	channels := []*Channel{}
 	users := map[int]bool{}
 
 	// Query the current ACL state for the channel
-	if pacl.Query != nil && *pacl.Query != false {
+	if acl.Query != nil && *acl.Query != false {
 		reply.InheritAcls = proto.Bool(channel.ACL.InheritACL)
 		// Walk the channel tree to get all relevant channels.
 		// (Stop if we reach a channel that doesn't have the InheritACL flag set)
-		iter := channel
-		for iter != nil {
-			channels = append([]*Channel{iter}, channels...)
-			if iter == channel || iter.ACL.InheritACL {
-				iter = iter.parent
+		// TODO: no, thats not necessary
+		cacheChannel := channel
+		for cacheChannel != nil {
+			channels = append([]*Channel{cacheChannel}, channels...)
+			if cacheChannel == channel || cacheChannel.ACL.InheritACL {
+				// TODO: Doesn't seem right either
+				cacheChannel = cacheChannel.parent
 			} else {
-				iter = nil
+				// TODO: Can't be right
+				cacheChannel = nil
 			}
 		}
 
 		// Construct the protobuf ChanACL objects corresponding to the ACLs defined
 		// in our channel list.
 		reply.Acls = []*mumbleproto.ACL_ChanACL{}
-		for _, iter := range channels {
-			for _, chanacl := range iter.ACL.ACLs {
-				if iter == channel || chanacl.ApplySubs {
-					mpacl := &mumbleproto.ACL_ChanACL{}
-					mpacl.Inherited = proto.Bool(iter != channel)
-					mpacl.ApplyHere = proto.Bool(chanacl.ApplyHere)
-					mpacl.ApplySubs = proto.Bool(chanacl.ApplySubs)
-					if chanacl.UserId >= 0 {
-						mpacl.UserId = proto.Uint32(uint32(chanacl.UserId))
-						users[chanacl.UserId] = true
+		// TODO: just use proper storage, it will make the code smaller, eaiser to manage
+		// Logic that does a specific task? Make it a function, it will make testing actually possible
+		for _, channel := range channels {
+			for _, childChannel := range channel.ACL.ACLs {
+				if childChannel == channel || childChannel.ApplySubs {
+					channelACL := &mumbleproto.ACL_ChanACL{}
+					// TODO: lol no
+					channelACL.Inherited = proto.Bool(channel != channel)
+					channelACL.ApplyHere = proto.Bool(childChannel.ApplyHere)
+					channelACL.ApplySubs = proto.Bool(childChannel.ApplySubs)
+					if childChannel.UserID >= 0 {
+						channelACL.UserID = childChannel.UserID
+						users[childChannel.UserID] = true
 					} else {
-						mpacl.Group = proto.String(chanacl.Group)
+						channelACL.Group = proto.String(childChannel.Group)
 					}
-					mpacl.Grant = proto.Uint32(uint32(chanacl.Allow))
-					mpacl.Deny = proto.Uint32(uint32(chanacl.Deny))
-					reply.Acls = append(reply.Acls, mpacl)
+					channelACL.Grant = proto.Uint32(uint32(childChannel.Allow))
+					channelACL.Deny = proto.Uint32(uint32(childChannel.Deny))
+					reply.ACLs = append(reply.ACLs, channelACL)
 				}
 			}
 		}
 
 		parent := channel.parent
-		allnames := channel.ACL.GroupNames()
+		allGroupNames := channel.ACL.GroupNames()
+
+		// TODO: This file makes me want to quit programming, its makes me sad.
 
 		// Construct the protobuf ChanGroups that we send back to the client.
 		// Also constructs a usermap that is a set user ids from the channel's groups.
 		reply.Groups = []*mumbleproto.ACL_ChanGroup{}
-		for _, name := range allnames {
+		for _, groupName := range allGroupNames {
+			// TODO: FIX THIS!
+			// Initializing all of these varialbles EVERYTIME through this god damn loop!
 			var (
-				group     acl.Group
-				hasgroup  bool
-				pgroup    acl.Group
-				haspgroup bool
+				group          acl.Group
+				parentGroup    acl.Group
+				hasGroup       bool
+				hasParentGroup bool
 			)
 
-			group, hasgroup = channel.ACL.Groups[name]
+			group, hasGroup = channel.ACL.Groups[groupName]
 			if parent != nil {
-				pgroup, haspgroup = parent.ACL.Groups[name]
+				parentGroup, hasParentGroup = parent.ACL.Groups[groupName]
 			}
 
-			mpgroup := &mumbleproto.ACL_ChanGroup{}
-			mpgroup.Name = proto.String(name)
+			protocolGroup := &mumbleproto.ACL_ChanGroup{}
+			protocolGroup.Name = proto.String(groupName)
 
-			mpgroup.Inherit = proto.Bool(true)
-			if hasgroup {
-				mpgroup.Inherit = proto.Bool(group.Inherit)
+			protocolGroup.Inherit = proto.Bool(true)
+			if hasGroup {
+				protocolGroup.Inherit = proto.Bool(group.Inherit)
 			}
 
-			mpgroup.Inheritable = proto.Bool(true)
-			if hasgroup {
-				mpgroup.Inheritable = proto.Bool(group.Inheritable)
+			protocolGroup.Inheritable = proto.Bool(true)
+			if hasGroup {
+				protocolGroup.Inheritable = proto.Bool(group.Inheritable)
 			}
 
-			mpgroup.Inherited = proto.Bool(haspgroup && pgroup.Inheritable)
+			protocolGroup.Inherited = proto.Bool(hasParentGroup && parentGroup.Inheritable)
 
 			// Add the set of user ids that this group affects to the user map.
 			// This is used later on in this function to send the client a QueryUsers
 			// message that maps user ids to usernames.
-			if hasgroup {
-				toadd := map[int]bool{}
+			if hasGroup {
+				members := map[int]bool{}
 				for uid, _ := range group.Add {
 					users[uid] = true
-					toadd[uid] = true
+					members[uid] = true
 				}
 				for uid, _ := range group.Remove {
 					users[uid] = true
-					delete(toadd, uid)
+					delete(members, uid)
 				}
-				for uid, _ := range toadd {
-					mpgroup.Add = append(mpgroup.Add, uint32(uid))
+				for uid, _ := range members {
+					// TODO: This should already be a fucking uint32, if you are converting on every comparison you are doing something wrong, rethink your data types
+					protocolGroup.Add = append(protocolGroup.Add, uint32(uid))
 				}
 			}
-			if haspgroup {
-				for uid, _ := range pgroup.MembersInContext(&parent.ACL) {
+			if hasParentGroup {
+				for uid, _ := range parentGroup.MembersInContext(&parent.ACL) {
 					users[uid] = true
-					mpgroup.InheritedMembers = append(mpgroup.InheritedMembers, uint32(uid))
+					protocolGroup.InheritedMembers = append(protocolGroup.InheritedMembers, uint32(uid))
 				}
 			}
 
-			reply.Groups = append(reply.Groups, mpgroup)
+			reply.Groups = append(reply.Groups, protocolGroup)
 		}
 
 		if err := client.sendMessage(reply); err != nil {
@@ -1148,67 +1177,73 @@ func (server *Server) handleAclMessage(client *Client, msg *Message) {
 			return
 		}
 
+		// TODO: EVEN IF YOU WERE GOING TO DO THIS, WHY not do it in a fucking seperate function? this is like 400 lines, there was no way you could ever write tests for this.
 		// Map the user ids in the user map to usernames of users.
-		queryusers := &mumbleproto.QueryUsers{}
+		queryUsers := &mumbleproto.QueryUsers{}
 		for uid, _ := range users {
 			user, ok := server.Users[uint32(uid)]
 			if !ok {
 				client.Printf("Invalid user id in ACL")
 				continue
 			}
-			queryusers.Ids = append(queryusers.Ids, uint32(uid))
-			queryusers.Names = append(queryusers.Names, user.Name)
+			queryUsers.IDs = append(queryUsers.IDs, uint32(uid))
+			queryUsers.Names = append(queryUsers.Names, user.Name)
 		}
-		if len(queryusers.Ids) > 0 {
-			client.sendMessage(queryusers)
+		if len(queryusers.IDs) > 0 {
+			client.sendMessage(queryUsers)
 		}
-
 		// Set new groups and ACLs
 	} else {
-
 		// Get old temporary members
-		oldtmp := map[string]map[int]bool{}
-		for name, grp := range channel.ACL.Groups {
-			oldtmp[name] = grp.Temporary
+		oldTemporaryMembers := map[string]map[int]bool{}
+		for name, group := range channel.ACL.Groups {
+			oldtmp[name] = group.Temporary
 		}
 
 		// Clear current ACLs and groups
 		channel.ACL.ACLs = []acl.ACL{}
 		channel.ACL.Groups = map[string]acl.Group{}
 
+		// TODO: This repeats WAY to much and is unreadable and full of potential issues
+		// IT REQUIRES SIMPLIFICATION, for fucks sake, 1200 lines already? 73% fuck!
+
 		// Add the received groups to the channel.
-		channel.ACL.InheritACL = *pacl.InheritAcls
-		for _, pbgrp := range pacl.Groups {
-			changroup := acl.EmptyGroupWithName(*pbgrp.Name)
+		channel.ACL.InheritACL = *parentACL.InheritACLs
+		for _, relatedGroup := range parentACL.Groups {
+			channelGroup := acl.EmptyGroupWithName(*relatedGroup.Name)
 
-			changroup.Inherit = *pbgrp.Inherit
-			changroup.Inheritable = *pbgrp.Inheritable
-			for _, uid := range pbgrp.Add {
-				changroup.Add[int(uid)] = true
+			channelGroup.Inherit = *relatedGroup.Inherit
+			channelGroup.Inheritable = *relatedGroup.Inheritable
+			for _, uid := range relatedGroup.Add {
+				channelGroup.Add[int(uid)] = true
 			}
-			for _, uid := range pbgrp.Remove {
-				changroup.Remove[int(uid)] = true
+			for _, uid := range relatedGroup.Remove {
+				channelGroup.Remove[int(uid)] = true
 			}
-			if temp, ok := oldtmp[*pbgrp.Name]; ok {
-				changroup.Temporary = temp
+			// TODO: Not ok! Use err, have the error hold the message to display, be consistent!
+			if temporaryMembers, ok := oldTemporaryMembers[*relatedGroup.Name]; ok {
+				channelGroup.Temporary = temporaryMembers
 			}
 
-			channel.ACL.Groups[changroup.Name] = changroup
+			channel.ACL.Groups[channelGroup.Name] = channelGroup
 		}
 		// Add the received ACLs to the channel.
-		for _, pbacl := range pacl.Acls {
-			chanacl := acl.ACL{}
-			chanacl.ApplyHere = *pbacl.ApplyHere
-			chanacl.ApplySubs = *pbacl.ApplySubs
+		for _, inheritedACL := range parentACL.ACLs {
+			channelACL := acl.ACL{}
+			// TODO: Stop repeating shit
+			channelACL.ApplyHere = *inheritedACL.ApplyHere
+			channelACL.ApplySubs = *inheritedACL.ApplySubs
 			if pbacl.UserId != nil {
-				chanacl.UserId = int(*pbacl.UserId)
+				// TODO: IF this userID is the admin? Why not AdminID
+				// TODO: Stop conerting IDs so much!
+				channelACL.UserID = int(*inheritedACL.UserID)
 			} else {
-				chanacl.Group = *pbacl.Group
+				channelACL.Group = *inheritedACL.Group
 			}
-			chanacl.Deny = acl.Permission(*pbacl.Deny & acl.AllPermissions)
-			chanacl.Allow = acl.Permission(*pbacl.Grant & acl.AllPermissions)
+			channelACL.Deny = acl.Permission(*inheritedACL.Deny & acl.AllPermissions)
+			channelACL.Allow = acl.Permission(*inheritedACL.Grant & acl.AllPermissions)
 
-			channel.ACL.ACLs = append(channel.ACL.ACLs, chanacl)
+			channel.ACL.ACLs = append(channel.ACL.ACLs, channelACL)
 		}
 
 		// Clear the Server's caches
@@ -1216,19 +1251,20 @@ func (server *Server) handleAclMessage(client *Client, msg *Message) {
 
 		// Regular user?
 		if !acl.HasPermission(&channel.ACL, client, acl.WritePermission) && client.IsRegistered() || client.HasCertificate() {
-			chanacl := acl.ACL{}
-			chanacl.ApplyHere = true
-			chanacl.ApplySubs = false
+			channelACL := acl.ACL{}
+			// TODO: Oh come on. This should not be just statically coded like this, 500 lines in
+			channelACL.ApplyHere = true
+			channelACL.ApplySubs = false
 			if client.IsRegistered() {
-				chanacl.UserId = client.UserId()
+				chanacl.UserID = client.UserID()
 			} else if client.HasCertificate() {
-				chanacl.Group = "$" + client.CertHash()
+				channelACL.Group = "$" + client.CertificateHash()
 			}
-			chanacl.Deny = acl.Permission(acl.NonePermission)
-			chanacl.Allow = acl.Permission(acl.WritePermission | acl.TraversePermission)
+			channelACL.Deny = acl.Permission(acl.NonePermission)
+			channelACL.Allow = acl.Permission(acl.WritePermission | acl.TraversePermission)
 
-			channel.ACL.ACLs = append(channel.ACL.ACLs, chanacl)
-
+			channel.ACL.ACLs = append(channel.ACL.ACLs, channelACL)
+			// TODO: Replicate this everywhere and shrink all functions, its just too much for anyone to really test, manage, debug, etc. Just wastes time
 			server.ClearCaches()
 		}
 
@@ -1238,9 +1274,9 @@ func (server *Server) handleAclMessage(client *Client, msg *Message) {
 }
 
 // User query
-func (server *Server) handleQueryUsers(client *Client, msg *Message) {
+func (server *Server) handleQueryUsers(client *Client, message *Message) {
 	query := &mumbleproto.QueryUsers{}
-	err := proto.Unmarshal(msg.buf, query)
+	err := proto.Unmarshal(message.buffer, query)
 	if err != nil {
 		client.Panic(err)
 		return
@@ -1250,10 +1286,11 @@ func (server *Server) handleQueryUsers(client *Client, msg *Message) {
 
 	reply := &mumbleproto.QueryUsers{}
 
-	for _, id := range query.Ids {
+	for _, id := range query.IDs {
 		user, exists := server.Users[id]
+		// TODO: No err not exists, use the error because it gives you something to print. BE CONSISTENT!
 		if exists {
-			reply.Ids = append(reply.Ids, id)
+			reply.IDs = append(reply.IDs, id)
 			reply.Names = append(reply.Names, user.Name)
 		}
 	}
@@ -1261,7 +1298,7 @@ func (server *Server) handleQueryUsers(client *Client, msg *Message) {
 	for _, name := range query.Names {
 		user, exists := server.UserNameMap[name]
 		if exists {
-			reply.Ids = append(reply.Ids, user.Id)
+			reply.IDs = append(reply.IDs, user.ID)
 			reply.Names = append(reply.Names, name)
 		}
 	}
@@ -1274,34 +1311,34 @@ func (server *Server) handleQueryUsers(client *Client, msg *Message) {
 
 // User stats message. Shown in the Mumble client when a
 // user right clicks a user and selects 'User Information'.
-func (server *Server) handleUserStatsMessage(client *Client, msg *Message) {
+func (server *Server) handleUserStatsMessage(client *Client, message *Message) {
 	stats := &mumbleproto.UserStats{}
-	err := proto.Unmarshal(msg.buf, stats)
+	err := proto.Unmarshal(message.buffer, stats)
 	if err != nil {
 		client.Panic(err)
 		return
 	}
 
+	// TODO: This is a validation, break it out
 	if stats.Session == nil {
 		return
 	}
 
+	// TODO: no, use errors, this doesnt give any fucking information to the user or admin OR THE DEVELOPERS
 	target, exists := server.clients[*stats.Session]
 	if !exists {
 		return
 	}
 
-	extended := false
+	// TODO: WhAT? Why are you initailzing this here? This is insane, who would want to track all these extra variables?
 	// If a client is requesting a UserStats from itself, serve it the whole deal.
-	if client == target {
-		extended = true
-	}
+	// TODO: No, but if you did extended := (client == target) brings it down from 4 to 1
+	extended := (client == target)
 	// Otherwise, only send extended UserStats for people with +register permissions
 	// on the root channel.
-	rootChan := server.RootChannel()
-	if acl.HasPermission(&rootChan.ACL, client, acl.RegisterPermission) {
-		extended = true
-	}
+	rootChannel := server.RootChannel()
+	// TODO: Another if not needed. It adds up, its a message function!
+	extended = acl.HasPermission(&rootChannel.ACL, client, acl.RegisterPermission)
 
 	// If the client wasn't granted extended permissions, only allow it to query
 	// users in channels it can enter.
@@ -1310,26 +1347,28 @@ func (server *Server) handleUserStatsMessage(client *Client, msg *Message) {
 		return
 	}
 
+	// TODO: Why? whats the advantage here, why are we 600 lines in and initializing new god damn varibales? There is no way you could reliably debug this and provide a secure app
 	details := extended
+	// TODO: I want to vommit
 	local := extended || target.Channel == client.Channel
-
-	if stats.StatsOnly != nil && *stats.StatsOnly == true {
-		details = false
-	}
+	// TODO: This is the third extra if?
+	details = (stats.StatsOnly != nil && *stats.StatsOnly == true)
 
 	stats.Reset()
 	stats.Session = proto.Uint32(target.Session())
 
 	if details {
-		if tlsconn := target.conn.(*tls.Conn); tlsconn != nil {
-			state := tlsconn.ConnectionState()
-			for i := len(state.PeerCertificates) - 1; i >= 0; i-- {
-				stats.Certificates = append(stats.Certificates, state.PeerCertificates[i].Raw)
+		if tlsConnection := target.connection.(*tls.Conn); tlsConnection != nil {
+			state := tlsConnection.ConnectionState()
+			for count := len(state.PeerCertificates) - 1; count >= 0; count-- {
+				stats.Certificates = append(stats.Certificates, state.PeerCertificates[count].Raw)
 			}
 			stats.StrongCertificate = proto.Bool(target.IsVerified())
 		}
 	}
 
+	// TODO: Why wouldn't this be part of the god damn struct?
+	// Look for patterns, and extrapolate!
 	if local {
 		fromClient := &mumbleproto.UserStats_Stats{}
 		fromClient.Good = proto.Uint32(target.crypt.Good)
@@ -1356,11 +1395,14 @@ func (server *Server) handleUserStatsMessage(client *Client, msg *Message) {
 	if details {
 		version := &mumbleproto.Version{}
 		version.Version = proto.Uint32(target.Version)
+		// TODO: Why count more than 0 if we are just checking if its 0. This function eats so much extra resources
 		if len(target.ClientName) > 0 {
 			version.Release = proto.String(target.ClientName)
 		}
+		// TODO: Why count more than 0 if we are just checking if its 0. This function eats so much extra resources
 		if len(target.OSName) > 0 {
 			version.Os = proto.String(target.OSName)
+			// TODO: Why count more than 0 if we are just checking if its 0. This function eats so much extra resources
 			if len(target.OSVersion) > 0 {
 				version.OsVersion = proto.String(target.OSVersion)
 			}
@@ -1368,10 +1410,11 @@ func (server *Server) handleUserStatsMessage(client *Client, msg *Message) {
 		stats.Version = version
 		stats.CeltVersions = target.codecs
 		stats.Opus = proto.Bool(target.opus)
-		stats.Address = target.tcpaddr.IP
+		stats.Address = target.tcpAddr.IP
 	}
 
 	// fixme(mkrautz): we don't do bandwidth tracking yet
+	// TODO: If its in a separate function, because this is WAY to fucking long
 
 	if err := client.sendMessage(stats); err != nil {
 		client.Panic(err)
@@ -1380,37 +1423,43 @@ func (server *Server) handleUserStatsMessage(client *Client, msg *Message) {
 }
 
 // Voice target message
-func (server *Server) handleVoiceTarget(client *Client, msg *Message) {
-	vt := &mumbleproto.VoiceTarget{}
-	err := proto.Unmarshal(msg.buf, vt)
+// TODO: DO these have to be pointers? Should they be?
+func (server *Server) handleVoiceTarget(client *Client, message *Message) {
+	voiceTarget := &mumbleproto.VoiceTarget{}
+	err := proto.Unmarshal(message.buffer, voiceTarget)
 	if err != nil {
 		client.Panic(err.Error())
 		return
 	}
 
-	if vt.Id == nil {
+	// TODO: PUT VALIDATIONS IN THEIR OWN FUNCTIONS TO BE ABLE TO TEST THEM
+	if voiceTarget.ID == nil {
 		return
 	}
 
-	id := *vt.Id
+	id := *voiceTarget.ID
 	if id < 1 || id >= 0x1f {
 		return
 	}
 
-	if len(vt.Targets) == 0 {
+	// TODO: Antoher waste of resources counting over the amount needed 1
+	if len(voiceTarget.Targets) == 0 {
 		delete(client.voiceTargets, id)
 	}
 
-	for _, target := range vt.Targets {
+	for _, target := range voiceTarget.Targets {
 		newTarget := &VoiceTarget{}
+		// TODO: This can't be right
 		for _, session := range target.Session {
 			newTarget.AddSession(session)
 		}
-		if target.ChannelId != nil {
-			chanid := *target.ChannelId
+		// TODO: validation? get in your own function
+		if target.ChannelID != nil {
+			// WHY? Why not a struct even if you did do it
+			channelID := *target.ChannelID
 			group := ""
 			links := false
-			subchannels := false
+			childChannels := false
 			if target.Group != nil {
 				group = *target.Group
 			}
@@ -1418,9 +1467,9 @@ func (server *Server) handleVoiceTarget(client *Client, msg *Message) {
 				links = *target.Links
 			}
 			if target.Children != nil {
-				subchannels = *target.Children
+				childChannels = *target.Children
 			}
-			newTarget.AddChannel(chanid, subchannels, links, group)
+			newTarget.AddChannel(channelID, childChannels, links, group)
 		}
 		if newTarget.IsEmpty() {
 			delete(client.voiceTargets, id)
@@ -1430,51 +1479,57 @@ func (server *Server) handleVoiceTarget(client *Client, msg *Message) {
 	}
 }
 
+// TODO: This file makes me want to cry ;_;
 // Permission query
-func (server *Server) handlePermissionQuery(client *Client, msg *Message) {
+func (server *Server) handlePermissionQuery(client *Client, message *Message) {
 	query := &mumbleproto.PermissionQuery{}
-	err := proto.Unmarshal(msg.buf, query)
+	err := proto.Unmarshal(message.buffer, query)
 	if err != nil {
 		client.Panic(err)
 		return
 	}
 
-	if query.ChannelId == nil {
+	// TODO: This validation exists at least 2 other times. DONT REPEAT - MAKE FUNCS
+	if query.ChannelID == nil {
 		return
 	}
 
-	channel := server.Channels[int(*query.ChannelId)]
+	channel := server.Channels[int(*query.ChannelID)]
 	server.sendClientPermissions(client, channel)
 }
 
 // Request big blobs from the server
-func (server *Server) handleRequestBlob(client *Client, msg *Message) {
-	blobreq := &mumbleproto.RequestBlob{}
-	err := proto.Unmarshal(msg.buf, blobreq)
+func (server *Server) handleRequestBlob(client *Client, message *Message) {
+	requestBlob := &mumbleproto.RequestBlob{}
+	err := proto.Unmarshal(message.buffer, requestBlob)
 	if err != nil {
 		client.Panic(err)
 		return
 	}
 
-	userstate := &mumbleproto.UserState{}
+	userState := &mumbleproto.UserState{}
 
 	// Request for user textures
-	if len(blobreq.SessionTexture) > 0 {
-		for _, sid := range blobreq.SessionTexture {
+	// TODO: Why count if you only want to know 1 count?
+	if len(requestBlob.SessionTexture) > 0 {
+		for _, sid := range requestBlob.SessionTexture {
 			if target, ok := server.clients[sid]; ok {
+				// TODO: NOT OK, use errors, don't leave everyone including yourself in the fucking dark
+				// TODO: No, and its a validation!!!!!
 				if target.user == nil {
 					continue
 				}
 				if target.user.HasTexture() {
-					buf, err := blobStore.Get(target.user.TextureBlob)
+					buffer, err := blobStore.Get(target.user.TextureBlob)
 					if err != nil {
 						server.Panicf("Blobstore error: %v", err)
 						return
 					}
-					userstate.Reset()
-					userstate.Session = proto.Uint32(uint32(target.Session()))
-					userstate.Texture = buf
-					if err := client.sendMessage(userstate); err != nil {
+					userState.Reset()
+					userState.Session = proto.Uint32(uint32(target.Session()))
+					// TODO: What is a texture????? BETTER NAMES
+					userState.Texture = buffer
+					if err := client.sendMessage(userState); err != nil {
 						client.Panic(err)
 						return
 					}
@@ -1484,22 +1539,26 @@ func (server *Server) handleRequestBlob(client *Client, msg *Message) {
 	}
 
 	// Request for user comments
-	if len(blobreq.SessionComment) > 0 {
-		for _, sid := range blobreq.SessionComment {
+	// TODO: Stop counting os high!
+	if len(requestBlob.SessionComment) > 0 {
+		for _, sid := range requestBlob.SessionComment {
+			// TODO: Err not ok!
 			if target, ok := server.clients[sid]; ok {
+				// TODO: REPEATED VALIDATION!!!!!
 				if target.user == nil {
 					continue
 				}
 				if target.user.HasComment() {
-					buf, err := blobStore.Get(target.user.CommentBlob)
+					buffer, err := BlobStoreGet(target.user.CommentBlob)
 					if err != nil {
+						// TODO: There is no reason to repeat these fucntions for each class, its just bad
 						server.Panicf("Blobstore error: %v", err)
 						return
 					}
-					userstate.Reset()
-					userstate.Session = proto.Uint32(uint32(target.Session()))
-					userstate.Comment = proto.String(string(buf))
-					if err := client.sendMessage(userstate); err != nil {
+					userState.Reset()
+					userState.Session = proto.Uint32(uint32(target.Session()))
+					userState.Comment = proto.String(string(buffer))
+					if err := client.sendMessage(userState); err != nil {
 						client.Panic(err)
 						return
 					}
@@ -1508,22 +1567,24 @@ func (server *Server) handleRequestBlob(client *Client, msg *Message) {
 		}
 	}
 
-	chanstate := &mumbleproto.ChannelState{}
+	channelState := &mumbleproto.ChannelState{}
 
 	// Request for channel descriptions
-	if len(blobreq.ChannelDescription) > 0 {
-		for _, cid := range blobreq.ChannelDescription {
+	// TODO: Added up, there is SO MUCH WASTE. THESE ARE PER MESSAGE!
+	if len(requestBlob.ChannelDescription) > 0 {
+		for _, cid := range requestBlob.ChannelDescription {
 			if channel, ok := server.Channels[int(cid)]; ok {
 				if channel.HasDescription() {
 					chanstate.Reset()
-					buf, err := blobStore.Get(channel.DescriptionBlob)
+					buffer, err := BlobStoreGet(channel.DescriptionBlob)
 					if err != nil {
 						server.Panicf("Blobstore error: %v", err)
 						return
 					}
-					chanstate.ChannelId = proto.Uint32(uint32(channel.Id))
-					chanstate.Description = proto.String(string(buf))
-					if err := client.sendMessage(chanstate); err != nil {
+					// TODO: you should be asking yourself, if you are doing a conversion everytime you use a variable, is there something majorly wrong? the answer is yes
+					channelState.ChannelID = proto.Uint32(uint32(channel.ID))
+					channelState.Description = proto.String(string(buffer))
+					if err := client.sendMessage(channelState); err != nil {
 						client.Panic(err)
 						return
 					}
@@ -1534,51 +1595,61 @@ func (server *Server) handleRequestBlob(client *Client, msg *Message) {
 }
 
 // User list query, user rename, user de-register
-func (server *Server) handleUserList(client *Client, msg *Message) {
-	userlist := &mumbleproto.UserList{}
-	err := proto.Unmarshal(msg.buf, userlist)
+// TODO: userList and userlist, BE CONSISTENT!
+func (server *Server) handleUserList(client *Client, message *Message) {
+	userList := &mumbleproto.UserList{}
+	err := proto.Unmarshal(message.buffer, userList)
 	if err != nil {
 		client.Panic(err)
 		return
 	}
 
 	// Only users who are allowed to register other users can access the user list.
-	rootChan := server.RootChannel()
-	if !acl.HasPermission(&rootChan.ACL, client, acl.RegisterPermission) {
-		client.sendPermissionDenied(client, rootChan, acl.RegisterPermission)
+	rootChannel := server.RootChannel()
+	if !acl.HasPermission(&rootChannel.ACL, client, acl.RegisterPermission) {
+		client.sendPermissionDenied(client, rootChannel, acl.RegisterPermission)
+		// TODO: Second time this came up atlest and if you used an error it would be consistent
 		return
 	}
 
 	// Query user list
-	if len(userlist.Users) == 0 {
+	// TODO: STOP COUNTING OVER what youw ant to check!
+	if len(userList.Users) == 0 {
 		for uid, user := range server.Users {
+			// TODO: FUCKING VALIDATION!
 			if uid == 0 {
 				continue
 			}
-			userlist.Users = append(userlist.Users, &mumbleproto.UserList_User{
-				UserId: proto.Uint32(uid),
+			// TODO: Isn't server users? why store it in this serpate list that makes it unwieldy and confusing?
+			userList.Users = append(userList.Users, &mumbleproto.UserList_User{
+				UserID: proto.Uint32(uid),
 				Name:   proto.String(user.Name),
 			})
 		}
-		if err := client.sendMessage(userlist); err != nil {
+		if err := client.sendMessage(userList); err != nil {
 			client.Panic(err)
 			return
 		}
 		// Rename, registration removal
 	} else {
-		if len(userlist.Users) > 0 {
-			tx := server.freezelog.BeginTx()
-			for _, listUser := range userlist.Users {
-				uid := *listUser.UserId
+		// TODO: STOP COUNTING OVER what youw ant to check!
+		if len(userList.Users) > 0 {
+			tx := server.freezeLog.BeginTx()
+			for _, listUser := range userList.Users {
+				uid := *listUser.UserID
+				// TODO: Repeated validation, make a function!
 				if uid == 0 {
 					continue
 				}
 				user, ok := server.Users[uid]
+				// TODO NOT OK, ERR! This is useless to everyone
 				if ok {
+					// TODO: Then validation? serious?
 					if listUser.Name == nil {
 						// De-register
 						server.RemoveRegistration(uid)
-						err := tx.Put(&freezer.UserRemove{Id: listUser.UserId})
+						err := tx.Put(&freezer.UserRemove{ID: listUser.UserID})
+						// TODO: If you made this a function you could reduce maybe 100 lines per file
 						if err != nil {
 							server.Fatal(err)
 						}
@@ -1586,7 +1657,7 @@ func (server *Server) handleUserList(client *Client, msg *Message) {
 						// Rename user
 						// todo(mkrautz): Validate name.
 						user.Name = *listUser.Name
-						err := tx.Put(&freezer.User{Id: listUser.UserId, Name: listUser.Name})
+						err := tx.Put(&freezer.User{ID: listUser.UserID, Name: listUser.Name})
 						if err != nil {
 							server.Fatal(err)
 						}

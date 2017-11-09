@@ -9,15 +9,20 @@ import (
 // Users are registered clients on the server.
 
 type User struct {
-	ID            uint32
-	Name          string
-	Password      string
-	CertHash      string
-	Email         string
-	TextureBlob   string
-	CommentBlob   string
-	LastChannelID int
-	LastActive    uint64
+	ID              uint32
+	Session         uint32
+	Name            string
+	Password        string
+	CertHash        string
+	Email           string
+	TextureBlob     string
+	CommentBlob     string
+	LastChannelID   uint32
+	LastActive      uint64
+	CertificateHash string
+	Tokens          []string
+	// CUSTOM
+	Roles []string
 }
 
 // Create a new User

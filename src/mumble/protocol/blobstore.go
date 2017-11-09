@@ -39,7 +39,7 @@ var (
 // operations to ensure atomicity. Thus, accessing a single BlobStore
 // from multiple goroutines should have no ill side effects.
 type BlobStore struct {
-	dir string
+	directory string
 }
 
 // Open opens an existing BlobStore. The path parameter must
@@ -47,7 +47,7 @@ type BlobStore struct {
 // operation, however, the Open function does not check that
 // this is the case.
 func Open(path string) BlobStore {
-	return BlobStore{dir: path}
+	return BlobStore{directory: path}
 }
 
 // isValidKey checks whether key is a valid BlobStore key.
@@ -70,7 +70,7 @@ func isValidKey(key string) bool {
 // blob identified by key should be stored under in the BlobStore.
 // This function also checks whether the key is valid. If not, it returns
 // ErrBadKey.
-func extractKeyComponents(key string) (dir string, fn string, err error) {
+func extractKeyComponents(key string) (directory string, filename string, err error) {
 	if !isValidKey(key) {
 		return "", "", ErrBadKey
 	}
@@ -82,11 +82,12 @@ func extractKeyComponents(key string) (dir string, fn string, err error) {
 // BlobStoreGet returns ErrNoSuchKey.
 // TODO: Can we just use a key/value store bitte?
 func BlobStoreGet(key string) ([]byte, error) {
-	dir, fn, err := extractKeyComponents(key)
+	directory, filename, err := extractKeyComponents(key)
 	if err != nil {
 		return nil, err
 	}
 
+	// TODO: two dir what?
 	blobfn := filepath.Join(dir, dir, fn)
 	f, err := os.Open(blobfn)
 	if os.IsNotExist(err) {
@@ -114,29 +115,30 @@ func BlobStoreGet(key string) ([]byte, error) {
 // the blob was successfully stored, the returned key can
 // be used to retrieve the buf from the BlobStore at a
 // later time.
-func (bs BlobStore) Put(buf []byte) (key string, err error) {
+func (blobStore BlobStore) BlobStorePut(buffer []byte) (key string, err error) {
 	// Calculate the key for the blob.  We can't really delay it more than this,
 	// since we need to know the key for the blob to check whether it's already on
 	// disk.
-	h := sha1.New()
-	_, err = h.Write(buf)
+	// TODO: Don't use sha1, same lib has better hashing
+	hash := sha1.New()
+	_, err = hash.Write(buffer)
 	if err != nil {
 		return "", err
 	}
-	key = hex.EncodeToString(h.Sum(nil))
+	key = hex.EncodeToString(hash.Sum(nil))
 
 	// BlobstoreGet the components that make up the on-disk
 	// path for the blob.
-	dir, fn, err := extractKeyComponents(key)
+	directory, filename, err := extractKeyComponents(key)
 	if err != nil {
 		return "", err
 	}
 
-	blobdir := filepath.Join(bs.dir, dir)
-	blobpath := filepath.Join(blobdir, fn)
+	blobDirectory := filepath.Join(blobStore.directory, directory)
+	blobPath := filepath.Join(blobDirectory, filename)
 
 	// Check if the blob already exists.
-	_, err = os.Stat(blobpath)
+	_, err = os.Stat(blobPath)
 	if err == nil {
 		// The file already exists. Our job is done.
 		return key, nil
@@ -148,7 +150,7 @@ func (bs BlobStore) Put(buf []byte) (key string, err error) {
 	}
 
 	// Ensure that blobdir exist.
-	err = os.Mkdir(blobdir, 0750)
+	err = os.Mkdir(blobDirectory, 0750)
 	if err != nil && !os.IsExist(err) {
 		return "", err
 	}
@@ -162,32 +164,32 @@ func (bs BlobStore) Put(buf []byte) (key string, err error) {
 	// the same blob at the same time. This shouldn't affect
 	// the consistency of the final blob, but worst case, we've
 	// done some extra work.
-	f, err := ioutil.TempFile(blobdir, fn)
+	file, err := ioutil.TempFile(blobDirectory, filename)
 	if err != nil {
 		return "", err
 	}
 
-	tmpfn := f.Name()
-	_, err = f.Write(buf)
+	temporaryFilename := file.Name()
+	_, err = file.Write(buffer)
 	if err != nil {
-		f.Close()
+		file.Close()
 		return "", err
 	}
 
-	err = f.Sync()
+	err = file.Sync()
 	if err != nil {
-		f.Close()
+		file.Close()
 		return "", err
 	}
 
-	err = f.Close()
+	err = file.Close()
 	if err != nil {
 		return "", err
 	}
 
-	err = os.Rename(tmpfn, blobpath)
+	err = os.Rename(temporaryFilename, blobPath)
 	if err != nil {
-		os.Remove(tmpfn)
+		os.Remove(temporaryFilename)
 		return "", err
 	}
 

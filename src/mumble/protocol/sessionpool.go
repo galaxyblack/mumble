@@ -15,9 +15,9 @@ type SessionPool struct {
 }
 
 // Create a new SessionPool container.
-func New() (pool *SessionPool) {
-	pool = new(SessionPool)
-	return
+// TODO: Is the pointer right?
+func NewSessionPool() *SessionPool {
+	return new(SessionPool)
 }
 
 // Enable use-tracking for the SessionPool.
@@ -28,7 +28,9 @@ func New() (pool *SessionPool) {
 // is in its list of used IDs. If this is not the case,
 // the program will panic.
 func (pool *SessionPool) EnableUseTracking() {
+	// TODO: Put validations in their own functions
 	if len(pool.unused) != 0 || pool.cur != 0 {
+		// TODO: Don't panic, error out properly, this will most likey be daemonized, its a server
 		panic("Attempt to enable use tracking on an existing SessionPool.")
 	}
 	pool.used = make(map[uint32]bool)
