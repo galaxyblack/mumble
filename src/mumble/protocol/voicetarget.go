@@ -13,15 +13,15 @@ type VoiceTarget struct {
 }
 
 type voiceTargetChannel struct {
-	id          uint32
-	subChannels bool
-	links       bool
-	onlyGroup   string
+	id            uint32
+	childChannels bool
+	links         bool
+	onlyGroup     string
 }
 
 // Add's a client's session to the VoiceTarget
-func (vt *VoiceTarget) AddSession(session uint32) {
-	vt.sessions = append(vt.sessions, session)
+func (voiceTarget *VoiceTarget) AddSession(session uint32) {
+	voiceTarget.sessions = append(voiceTarget.sessions, session)
 }
 
 // Add a channel to the VoiceTarget.
@@ -29,70 +29,72 @@ func (vt *VoiceTarget) AddSession(session uint32) {
 // If links is true, any sent voice packets will also be sent to all linked channels.
 // If group is a non-empty string, any sent voice packets will only be broadcast to members
 // of that group who reside in the channel (or its children or linked channels).
-func (vt *VoiceTarget) AddChannel(id uint32, subchannels bool, links bool, group string) {
-	vt.channels = append(vt.channels, voiceTargetChannel{
-		id:          id,
-		subChannels: subchannels,
-		links:       links,
-		onlyGroup:   group,
+func (voiceTarget *VoiceTarget) AddChannel(id uint32, children bool, links bool, group string) {
+	voiceTarget.channels = append(voiceTarget.channels, voiceTargetChannel{
+		id:            id,
+		childChannels: children,
+		links:         links,
+		onlyGroup:     group,
 	})
 }
 
 // Checks whether the VoiceTarget is empty (has no targets)
-func (vt *VoiceTarget) IsEmpty() bool {
-	return len(vt.sessions) == 0 && len(vt.channels) == 0
+func (voiceTarget *VoiceTarget) IsEmpty() bool {
+	// TODO: Feel like should not need to be counting past 0 to check if these are nil/empty. Wasting CPU
+	return len(voiceTarget.sessions) == 0 && len(voiceTarget.channels) == 0
 }
 
 // Clear the VoiceTarget's cache.
-func (vt *VoiceTarget) ClearCache() {
-	vt.directCache = nil
-	vt.fromChannelsCache = nil
+func (voiceTarget *VoiceTarget) ClearCache() {
+	voiceTarget.directCache = nil
+	voiceTarget.fromChannelsCache = nil
 }
 
 // Send the contents of the VoiceBroadcast to all targets specified in the
 // VoiceTarget.
-func (vt *VoiceTarget) SendVoiceBroadcast(vb *VoiceBroadcast) {
-	buf := vb.buf
-	client := vb.client
+func (voiceTarget *VoiceTarget) SendVoiceBroadcast(voiceBroadcast *VoiceBroadcast) {
+	buffer := voiceBroadcast.buffer
+	client := voiceBroadcast.client
 	server := client.server
 
-	direct := vt.directCache
-	fromChannels := vt.fromChannelsCache
+	direct := voiceTarget.directCache
+	fromChannels := voiceTarget.fromChannelsCache
 
 	if direct == nil || fromChannels == nil {
 		direct = make(map[uint32]*Client)
 		fromChannels = make(map[uint32]*Client)
 
-		for _, vtc := range vt.channels {
-			channel := server.Channels[int(vtc.id)]
+		for _, voiceTargetChannel := range voiceTarget.channels {
+			channel := server.Channels[int(voiceTargetChannel.id)]
+			// TODO: This is a validation, get this in its own function, stop writing 200 line god damn functions
 			if channel == nil {
 				continue
 			}
 
-			if !vtc.subChannels && !vtc.links && vtc.onlyGroup == "" {
+			if !voiceTargetChannel.childChannels && !voiceTargetChannel.links && voiceTargetChannel.onlyGroup == "" {
 				if acl.HasPermission(&channel.ACL, client, acl.WhisperPermission) {
 					for _, target := range channel.clients {
 						fromChannels[target.Session()] = target
 					}
 				}
 			} else {
-				server.Printf("%v", vtc)
-				newchans := make(map[int]*Channel)
-				if vtc.links {
-					newchans = channel.AllLinks()
+				server.Printf("%v", voiceTargetChannel)
+				newChannels := make(map[int]*Channel)
+				if voiceTargetChannel.links {
+					newChannels = channel.AllLinks()
 				} else {
-					newchans[channel.Id] = channel
+					newChannels[channel.ID] = channel
 				}
-				if vtc.subChannels {
-					subchans := channel.AllSubChannels()
-					for k, v := range subchans {
-						newchans[k] = v
+				if voiceTargetChannel.childChannels {
+					childChannels := channel.AllChildChannels()
+					for key, value := range childChannels {
+						newChannels[key] = value
 					}
 				}
-				for _, newchan := range newchans {
-					if acl.HasPermission(&newchan.ACL, client, acl.WhisperPermission) {
-						for _, target := range newchan.clients {
-							if vtc.onlyGroup == "" || acl.GroupMemberCheck(&newchan.ACL, &newchan.ACL, vtc.onlyGroup, target) {
+				for _, newChannel := range newChannels {
+					if acl.HasPermission(&newChannel.ACL, client, acl.WhisperPermission) {
+						for _, target := range newChannel.clients {
+							if voiceTargetChannel.onlyGroup == "" || acl.GroupMemberCheck(&newChannel.ACL, &newChannel.ACL, voiceTargetChannel.onlyGroup, target) {
 								fromChannels[target.Session()] = target
 							}
 						}
@@ -101,7 +103,7 @@ func (vt *VoiceTarget) SendVoiceBroadcast(vb *VoiceBroadcast) {
 			}
 		}
 
-		for _, session := range vt.sessions {
+		for _, session := range voiceTarget.sessions {
 			target := server.clients[session]
 			if target != nil {
 				if _, alreadyInFromChannels := fromChannels[target.Session()]; !alreadyInFromChannels {
@@ -114,21 +116,21 @@ func (vt *VoiceTarget) SendVoiceBroadcast(vb *VoiceBroadcast) {
 		delete(direct, client.Session())
 		delete(fromChannels, client.Session())
 
-		if vt.directCache == nil {
-			vt.directCache = direct
+		if voiceTarget.directCache == nil {
+			voiceTarget.directCache = direct
 		}
 
-		if vt.fromChannelsCache == nil {
+		if voiceTarget.fromChannelsCache == nil {
 			vt.fromChannelsCache = fromChannels
 		}
 	}
 
-	kind := buf[0] & 0xe0
+	kind := buffer[0] & 0xe0
 
 	if len(fromChannels) > 0 {
 		for _, target := range fromChannels {
-			buf[0] = kind | 2
-			err := target.SendUDP(buf)
+			buffer[0] = kind | 2
+			err := target.SendUDP(buffer)
 			if err != nil {
 				target.Panicf("Unable to send UDP packet: %v", err.Error())
 			}
@@ -137,9 +139,9 @@ func (vt *VoiceTarget) SendVoiceBroadcast(vb *VoiceBroadcast) {
 
 	if len(direct) > 0 {
 		for _, target := range direct {
-			buf[0] = kind | 2
-			target.SendUDP(buf)
-			err := target.SendUDP(buf)
+			buffer[0] = kind | 2
+			target.SendUDP(buffer)
+			err := target.SendUDP(buffer)
 			if err != nil {
 				target.Panicf("Unable to send UDP packet: %v", err.Error())
 			}

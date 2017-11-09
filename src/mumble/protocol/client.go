@@ -24,7 +24,7 @@ type Client struct {
 	*log.Logger
 
 	// TODO: What is a log forwarder? Can it be replaced and this module simplified by just using existing logging library that is community maintained? Lets focus on what makes this DIFFERENt isntead of remaking every wheel worse than the community maintained libraries
-	logForwarder *LogForwarder
+	//logForwarder *LogForwarder
 
 	// Connection-related
 	tcpAddr    *net.TCPAddr
@@ -75,11 +75,9 @@ type Client struct {
 
 	// Personal
 	// TODO: Good candidate for a nested struct, it even has a name
+	// Also lets isolate out the public and private so its easier to read
 	Username        string
-	session         uint32
-	certHash        string
 	Email           string
-	tokens          []string
 	Channel         *Channel
 	SelfMute        bool
 	SelfDeaf        bool
@@ -90,6 +88,9 @@ type Client struct {
 	Recording       bool
 	PluginContext   []byte
 	PluginIdentity  string
+	session         uint32
+	certificateHash string
+	tokens          []string
 }
 
 // Debugf implements debug-level printing for Clients.
@@ -164,8 +165,9 @@ func (client *Client) ShownName() string {
 // Check whether the client's certificate is
 // verified.
 func (client *Client) IsVerified() bool {
-	tlsconn := client.conn.(*tls.Conn)
-	state := tlsconn.ConnectionState()
+	// TODO: There seems to be a lot of assigning local variables when its not erally ncessary
+	tlsConnection := client.connection.(*tls.Conn)
+	state := tlsConnection.ConnectionState()
 	return len(state.VerifiedChains) > 0
 }
 
@@ -186,9 +188,8 @@ func (client *Client) disconnect(kicked bool) {
 	if !client.disconnected {
 		client.disconnected = true
 		client.server.RemoveClient(client, kicked)
-
 		// Close the client's UDP reciever goroutine.
-		close(client.udprecv)
+		close(client.udpReceive)
 
 		// If the client paniced during authentication, before reaching
 		// the ready state, the receiver goroutine will be waiting for
@@ -202,7 +203,7 @@ func (client *Client) disconnect(kicked bool) {
 		}
 
 		client.Printf("Disconnected")
-		client.conn.Close()
+		client.connection.Close()
 
 		client.server.updateCodecVersions(nil)
 	}
@@ -241,7 +242,7 @@ func (client *Client) RejectAuth(rejectType mumbleproto.Reject_RejectType, reaso
 }
 
 // Read a protobuf message from a client
-func (client *Client) readProtoMessage() (msg *Message, err error) {
+func (client *Client) readProtocolMessage() (message *Message, err error) {
 	var (
 		length uint32
 		kind   uint16
@@ -265,7 +266,7 @@ func (client *Client) readProtoMessage() (msg *Message, err error) {
 		return
 	}
 
-	msg = &Message{
+	message = &Message{
 		buf:    buf,
 		kind:   kind,
 		client: client,
@@ -296,13 +297,13 @@ func (c *Client) sendPermissionDeniedTypeUser(denyType mumbleproto.PermissionDen
 
 // Send permission denied by who, what, where
 func (c *Client) sendPermissionDenied(who *Client, where *Channel, what uint32) {
-	pd := &mumbleproto.PermissionDenied{
+	permissionDenied := &mumbleproto.PermissionDenied{
 		Permission: proto.Uint32(uint32(what)),
 		ChannelID:  proto.Uint32(uint32(where.ID)),
 		Session:    proto.Uint32(who.Session()),
 		Type:       mumbleproto.PermissionDenied_Permission.Enum(),
 	}
-	err := c.sendMessage(pd)
+	err := c.sendMessage(permissionDenied)
 	if err != nil {
 		c.Panicf("%v", err.Error())
 		return
@@ -311,13 +312,13 @@ func (c *Client) sendPermissionDenied(who *Client, where *Channel, what uint32) 
 
 // Send permission denied fallback
 func (client *Client) sendPermissionDeniedFallback(denyType mumbleproto.PermissionDenied_DenyType, version uint32, text string) {
-	pd := &mumbleproto.PermissionDenied{
+	permissionDenied := &mumbleproto.PermissionDenied{
 		Type: denyType.Enum(),
 	}
 	if client.Version < version {
-		pd.Reason = proto.String(text)
+		permissionDenied.Reason = proto.String(text)
 	}
-	err := client.sendMessage(pd)
+	err := client.sendMessage(permissionDenied)
 	if err != nil {
 		client.Panicf("%v", err.Error())
 		return
@@ -325,15 +326,18 @@ func (client *Client) sendPermissionDeniedFallback(denyType mumbleproto.Permissi
 }
 
 // UDP receive loop
-func (client *Client) udpRecvLoop() {
-	for buf := range client.udprecv {
-		// Received a zero-valued buffer. This means that the udprecv
+func (client *Client) udpReceiveLoop() {
+	for buffer := range client.udpReceive {
+		// Received a zero-valued buffer. This means that the udpReceive
 		// channel was closed, so exit cleanly.
-		if len(buf) == 0 {
+		// TODO: This is a validation, so it should be broken off into its own function
+		// TODO: Check if len check or just index[0] check is faster
+		// TODO: WOULD THE BUFFER BE EMPTY OR NIL? Because both ahve 0 length and why count past 0 when finding out if its just nil or empty?
+		if len(buffer) == 0 {
 			return
 		}
 
-		kind := (buf[0] >> 5) & 0x07
+		kind := (buffer[0] >> 5) & 0x07
 
 		switch kind {
 		case mumbleproto.UDPMessageVoiceSpeex:
@@ -346,12 +350,13 @@ func (client *Client) udpRecvLoop() {
 			}
 			fallthrough
 		case mumbleproto.UDPMessageVoiceOpus:
-			target := buf[0] & 0x1f
+			target := buffer[0] & 0x1f
 			var counter uint8
-			outbuf := make([]byte, 1024)
+			outBuffer := make([]byte, 1024)
 
-			incoming := NewPacket(buf[1 : 1+(len(buf)-1)])
-			outgoing := NewPacket(outbuf[1 : 1+(len(outbuf)-1)])
+			incoming := NewPacket(buffer[1 : 1+(len(buffer)-1)])
+			outgoing := NewPacket(outBuffer[1 : 1+(len(outBuffer)-1)])
+			// TODO: Have a feeling this is not a good thing to keep
 			_ = incoming.GetUint32()
 
 			if kind != mumbleproto.UDPMessageVoiceOpus {
@@ -368,25 +373,27 @@ func (client *Client) udpRecvLoop() {
 			}
 
 			outgoing.PutUint32(client.Session())
-			outgoing.PutBytes(buf[1 : 1+(len(buf)-1)])
-			outbuf[0] = buf[0] & 0xe0 // strip target
+			outgoing.PutBytes(buffer[1 : 1+(len(buffer)-1)])
+			outBuffer[0] = buffer[0] & 0xe0 // strip target
 
 			if target != 0x1f { // VoiceTarget
+				// TODO: There must be a reason to establish this fucking struct previously to this
 				client.server.voiceBroadcast <- &VoiceBroadcast{
 					client: client,
-					buf:    outbuf[0 : 1+outgoing.Size()],
+					buffer: outBuffer[0 : 1+outgoing.Size()],
 					target: target,
 				}
 			} else { // Server loopback
-				buf := outbuf[0 : 1+outgoing.Size()]
-				err := client.SendUDP(buf)
+				buffer := outBuffer[0 : 1+outgoing.Size()]
+				// TODO: We not really going to return this err?
+				err := client.SendUDP(buffer)
 				if err != nil {
 					client.Panicf("Unable to send UDP message: %v", err.Error())
 				}
 			}
 
 		case mumbleproto.UDPMessagePing:
-			err := client.SendUDP(buf)
+			err := client.SendUDP(buffer)
 			if err != nil {
 				client.Panicf("Unable to send UDP message: %v", err.Error())
 			}
@@ -394,62 +401,64 @@ func (client *Client) udpRecvLoop() {
 	}
 }
 
-// Send buf as a UDP message. If the client does not have
+// Send buffer as a UDP message. If the client does not have
 // an established UDP connection, the datagram will be tunelled
 // through the client's control channel (TCP).
-func (client *Client) SendUDP(buf []byte) error {
+func (client *Client) SendUDP(buffer []byte) error {
 	if client.udp {
-		crypted := make([]byte, len(buf)+client.crypt.Overhead())
-		client.crypt.Encrypt(crypted, buf)
-		return client.server.SendUDP(crypted, client.udpaddr)
+		crypted := make([]byte, len(buffer)+client.crypt.Overhead())
+		client.crypt.Encrypt(crypted, buffer)
+		return client.server.SendUDP(crypted, client.udpAddr)
 	} else {
-		return client.sendMessage(buf)
+		return client.sendMessage(buffer)
 	}
 	panic("unreachable")
 }
 
-// Send a Message to the client.  The Message in msg to the client's
+// Send a Message to the client.  The Message in message to the client's
 // buffered writer and flushes it when done.
 //
 // This method should only be called from within the client's own
 // sender goroutine, since it serializes access to the underlying
 // buffered writer.
-func (client *Client) sendMessage(msg interface{}) error {
-	buf := new(bytes.Buffer)
+// TODO: Why not actually have a message interface intead of initialziing inline in the sendMesssage. There must be uses in individual validations and much more
+func (client *Client) sendMessage(message interface{}) error {
+	buffer := new(bytes.Buffer)
 	var (
-		kind    uint16
-		msgData []byte
-		err     error
+		kind        uint16
+		messageData []byte
+		err         error
 	)
 
-	kind = mumbleproto.MessageType(msg)
+	kind = mumbleproto.MessageType(message)
 	if kind == mumbleproto.MessageUDPTunnel {
-		msgData = msg.([]byte)
+		messageData = message.([]byte)
 	} else {
-		protoMsg, ok := (msg).(proto.Message)
+		protoMessage, ok := (message).(proto.Message)
 		if !ok {
 			return errors.New("client: exepcted a proto.Message")
 		}
-		msgData, err = proto.Marshal(protoMsg)
+		messageData, err = proto.Marshal(protoMessage)
 		if err != nil {
 			return err
 		}
 	}
 
-	err = binary.Write(buf, binary.BigEndian, kind)
+	err = binary.Write(buffer, binary.BigEndian, kind)
+	// TODO: if these validations were moved into their own functions would be easy to test and could gather all the errors and present them together instead of having the user fix 1 by 1 like a loser
 	if err != nil {
 		return err
 	}
-	err = binary.Write(buf, binary.BigEndian, uint32(len(msgData)))
+	err = binary.Write(buffer, binary.BigEndian, uint32(len(messageData)))
 	if err != nil {
 		return err
 	}
-	_, err = buf.Write(msgData)
+	_, err = buffer.Write(messageData)
 	if err != nil {
 		return err
 	}
 
-	_, err = client.conn.Write(buf.Bytes())
+	_, err = client.connection.Write(buffer.Bytes())
 	if err != nil {
 		return err
 	}
@@ -458,13 +467,13 @@ func (client *Client) sendMessage(msg interface{}) error {
 }
 
 // TLS receive loop
-func (client *Client) tlsRecvLoop() {
+func (client *Client) tlsReceiveLoop() {
 	for {
 		// The version handshake is done, the client has been authenticated and it has received
 		// all necessary information regarding the server.  Now we're ready to roll!
 		if client.state == StateClientReady {
 			// Try to read the next message in the pool
-			msg, err := client.readProtoMessage()
+			message, err := client.readProtocolMessage()
 			if err != nil {
 				if err == io.EOF {
 					client.Disconnect()
@@ -475,18 +484,18 @@ func (client *Client) tlsRecvLoop() {
 			}
 			// Special case UDPTunnel messages. They're high priority and shouldn't
 			// go through our synchronous path.
-			if msg.kind == mumbleproto.MessageUDPTunnel {
+			if message.kind == mumbleproto.MessageUDPTunnel {
 				client.udp = false
-				client.udprecv <- msg.buf
+				client.udpReceive <- message.buffer
 			} else {
-				client.server.incoming <- msg
+				client.server.incoming <- message
 			}
 		}
 
 		// The client has responded to our version query. It will try to authenticate.
 		if client.state == StateClientSentVersion {
 			// Try to read the next message in the pool
-			msg, err := client.readProtoMessage()
+			message, err := client.readProtocolMessage()
 			if err != nil {
 				if err == io.EOF {
 					client.Disconnect()
@@ -497,7 +506,7 @@ func (client *Client) tlsRecvLoop() {
 			}
 
 			client.clientReady = make(chan bool)
-			go client.server.handleAuthenticate(client, msg)
+			go client.server.handleAuthenticate(client, message)
 			<-client.clientReady
 
 			// It's possible that the client has disconnected in the meantime.
@@ -530,7 +539,7 @@ func (client *Client) tlsRecvLoop() {
 			client.state = StateServerSentVersion
 			continue
 		} else if client.state == StateServerSentVersion {
-			msg, err := client.readProtoMessage()
+			message, err := client.readProtocolMessage()
 			if err != nil {
 				if err == io.EOF {
 					client.Disconnect()
@@ -541,7 +550,7 @@ func (client *Client) tlsRecvLoop() {
 			}
 
 			version := &mumbleproto.Version{}
-			err = proto.Unmarshal(msg.buf, version)
+			err = proto.Unmarshal(message.buffer, version)
 			if err != nil {
 				client.Panicf("%v", err)
 				return

@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"time"
 
+	"mumble/protocol/mumbleproto"
+
 	"github.com/golang/protobuf/proto"
 )
 
