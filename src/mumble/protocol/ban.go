@@ -10,13 +10,13 @@ const (
 )
 
 type Ban struct {
-	IP       net.IP
-	Mask     int
-	Username string
-	CertHash string
-	Reason   string
-	Start    int64
-	Duration uint32
+	IP              net.IP
+	Mask            int
+	Username        string
+	CertificateHash string
+	Reason          string
+	Start           int64
+	Duration        uint32
 }
 
 // Create a net.IPMask from a specified amount of mask bits

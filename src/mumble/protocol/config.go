@@ -27,18 +27,18 @@ type Config struct {
 	// TODO: Define some default values
 	DataDirectory string // TODO: Only fucking one that should be a string!!!!
 	// TODO: Should this be uint? Itd be much faster for comparisons, if we are going to do these comparisons all the time anyways
-	MaxBandwidth       string
-	MaxUsers           string
-	MaxUsersPerChannel string
+	MaxBandwidth       int
+	MaxUsers           int
+	MaxUsersPerChannel int
 	// TODO: For fucks sake, we know this is checked every fucking message, and we are doing string comparison? Yep I've fucking lost it
-	MaxTestMessageLength  string
-	MaxImageMessageLength string
-	AllowHTML             string // TODO: Can we just use a bool? EVERY MESSAGE WE ARE CHECKING THIS? a bool as a string? for fucks sake
+	MaxTestMessageLength  int
+	MaxImageMessageLength int
+	AllowHTML             bool // TODO: Can we just use a bool? EVERY MESSAGE WE ARE CHECKING THIS? a bool as a string? for fucks sake
 	// TODO: Just read above todos and apply below, right now I just want something to build and work, so fuck everything but seriously, this is awful design
 	DefaultChannel       string
 	RememberChannel      string
 	WelcomeText          string
-	SendVersion          string
+	SendVersion          bool
 	customConfigurations map[string]string // TODO: I really prefer use a key value store but this is not terrible if we are talking about a few custom values
 	// TODO: But keep in mind why use a string instead of a struct that lets the object be an int, uint, bool, and string for comparison so we dont wnat to slit our wrists and waste money and energy? there is a reason we didnt write this in JS
 	configMap map[string]string

@@ -4,8 +4,8 @@ import (
 	"crypto/aes"
 	"crypto/tls"
 	"fmt"
-	"net"
-	"time"
+	//"net"
+	//"time"
 
 	"github.com/golang/protobuf/proto"
 
@@ -155,6 +155,7 @@ func (server *Server) handleChannelStateMessage(client *Client, message *Message
 	// TODO: This feels like it belongs in a struct, not just loose as a local variable...
 	var channel *Channel
 	var parent *Channel
+	// TODO: Don't use ok use error
 	var ok bool
 
 	// Lookup channel for channel ID
@@ -258,8 +259,10 @@ func (server *Server) handleChannelStateMessage(client *Client, message *Message
 		}
 
 		key := ""
+		// TODO you are just checking if its over size of 0 so dont count everything, its a waste
 		if len(description) > 0 {
-			key, err = BlobStorePut([]byte(description))
+			// TODO: This relies on a blob store existing, and really should just get rid of this code and use a library that maintained instead of reinventing the wheel
+			//key, err = BlobStorePut([]byte(description))
 			if err != nil {
 				server.Panicf("Blobstore error: %v", err)
 			}
@@ -268,88 +271,89 @@ func (server *Server) handleChannelStateMessage(client *Client, message *Message
 		// Add the new channel
 		channel = server.AddChannel(name)
 		channel.DescriptionBlob = key
-		channel.temporary = *chanstate.Temporary
-		channel.Position = int(*chanstate.Position)
+		channel.temporary = *channelState.Temporary
+		channel.Position = int(*channelState.Position)
 		parent.AddChild(channel)
 
 		// Add the creator to the channel's admin group
 		if client.IsRegistered() {
-			grp := acl.EmptyGroupWithName("admin")
-			grp.Add[client.UserID()] = true
-			channel.ACL.Groups["admin"] = grp
+			group := NewGroup("admin")
+			group.Add[client.UserID()] = true
+			// TODO: Gonna need to correct this
+			//channel.ACL.Groups["admin"] = group
 		}
 
 		// If the client wouldn't have WritePermission in the just-created channel,
 		// add a +write ACL for the user's hash.
-		if !acl.HasPermission(&channel.ACL, client, acl.WritePermission) {
-			aclEntry := acl.ACL{}
-			aclEntry.ApplyHere = true
-			aclEntry.ApplySubs = true
-			if client.IsRegistered() {
-				aclEntry.UserID = client.UserID()
-			} else {
-				aclEntry.Group = "$" + client.CertHash()
-			}
-			aclEntry.Deny = acl.Permission(acl.NonePermission)
-			aclEntry.Allow = acl.Permission(acl.WritePermission | acl.TraversePermission)
+		//if !&channel.ACL.HasPermission(client, acl.WritePermission) {
+		//	aclEntry := acl.ACL{}
+		//	aclEntry.ApplyHere = true
+		//	aclEntry.ApplySubs = true
+		//	if client.IsRegistered() {
+		//		aclEntry.UserID = client.UserID()
+		//	} else {
+		//		aclEntry.Group = "$" + client.CertificateHash()
+		//	}
+		//	aclEntry.Deny = acl.Permission(acl.NonePermission)
+		//	aclEntry.Allow = acl.Permission(acl.WritePermission | acl.TraversePermission)
 
-			channel.ACL.ACLs = append(channel.ACL.ACLs, aclEntry)
+		//	channel.ACL.ACLs = append(channel.ACL.ACLs, aclEntry)
 
-			server.ClearCaches()
-		}
+		//	server.ClearCaches()
+		//}
 
-		chanstate.ChannelID = proto.Uint32(channel.ID)
+		channelState.ChannelID = proto.Uint32(channel.ID)
 
 		// Broadcast channel add
-		server.broadcastProtoMessageWithPredicate(chanstate, func(client *Client) bool {
+		server.broadcastProtoMessageWithPredicate(channelState, func(client *Client) bool {
 			return client.Version < 0x10202
 		})
 
 		// Remove description if client knows how to handle blobs.
-		if chanstate.Description != nil && channel.HasDescription() {
-			chanstate.Description = nil
-			chanstate.DescriptionHash = channel.DescriptionBlobHashBytes()
+		if channelState.Description != nil && channel.HasDescription() {
+			channelState.Description = nil
+			channelState.DescriptionHash = channel.DescriptionBlobHashBytes()
 		}
-		server.broadcastProtoMessageWithPredicate(chanstate, func(client *Client) bool {
+		server.broadcastProtoMessageWithPredicate(channelState, func(client *Client) bool {
 			return client.Version >= 0x10202
 		})
 
 		// If it's a temporary channel, move the creator in there.
 		if channel.IsTemporary() {
-			userstate := &mumbleproto.UserState{}
-			userstate.Session = proto.Uint32(client.Session())
-			userstate.ChannelID = proto.Uint32(channel.ID)
-			server.userEnterChannel(client, channel, userstate)
-			server.broadcastProtoMessage(userstate)
+			userState := &mumbleproto.UserState{}
+			userState.Session = proto.Uint32(client.Session())
+			userState.ChannelID = proto.Uint32(channel.ID)
+			server.userEnterChannel(client, channel, userState)
+			server.broadcastProtoMessage(userState)
 		}
 	} else {
 		// Edit existing channel.
 		// First, check whether the actor has the neccessary permissions.
 
 		// Name change.
-		if chanstate.Name != nil {
+		if channelState.Name != nil {
 			// The client can only rename the channel if it has WritePermission in the channel.
 			// Also, clients cannot change the name of the root channel.
-			if !acl.HasPermission(&channel.ACL, client, acl.WritePermission) || channel.ID == 0 {
-				client.sendPermissionDenied(client, channel, acl.WritePermission)
-				return
-			}
+			//if !&channel.ACL.HasPermission(client, acl.WritePermission) || channel.ID == 0 {
+			//	client.sendPermissionDenied(client, channel, acl.WritePermission)
+			//	return
+			//}
 		}
 
 		// Description change
-		if chanstate.Description != nil {
-			if !acl.HasPermission(&channel.ACL, client, acl.WritePermission) {
-				client.sendPermissionDenied(client, channel, acl.WritePermission)
-				return
-			}
+		if channelState.Description != nil {
+			//if !&channel.ACL.HasPermission(client, acl.WritePermission) {
+			//	client.sendPermissionDenied(client, channel, acl.WritePermission)
+			//	return
+			//}
 		}
 
 		// Position change
-		if chanstate.Position != nil {
-			if !acl.HasPermission(&channel.ACL, client, acl.WritePermission) {
-				client.sendPermissionDenied(client, channel, acl.WritePermission)
-				return
-			}
+		if channelState.Position != nil {
+			//if !acl.HasPermission(&channel.ACL, client, acl.WritePermission) {
+			//	client.sendPermissionDenied(client, channel, acl.WritePermission)
+			//	return
+			//}
 		}
 
 		// Parent change (channel move)
@@ -376,16 +380,16 @@ func (server *Server) handleChannelStateMessage(client *Client, message *Message
 			}
 
 			// To move a channel, the user must have WritePermission in the channel
-			if !acl.HasPermission(&channel.ACL, client, acl.WritePermission) {
-				client.sendPermissionDenied(client, channel, acl.WritePermission)
-				return
-			}
+			//if !acl.HasPermission(&channel.ACL, client, acl.WritePermission) {
+			//	client.sendPermissionDenied(client, channel, acl.WritePermission)
+			//	return
+			//}
 
 			// And the user must also have MakeChannel permission in the new parent
-			if !acl.HasPermission(&parent.ACL, client, acl.MakeChannelPermission) {
-				client.sendPermissionDenied(client, parent, acl.MakeChannelPermission)
-				return
-			}
+			//if !acl.HasPermission(&parent.ACL, client, acl.MakeChannelPermission) {
+			//	client.sendPermissionDenied(client, parent, acl.MakeChannelPermission)
+			//	return
+			//}
 
 			// If a sibling of parent already has this name, don't allow it.
 			for _, iter := range parent.children {
@@ -397,31 +401,33 @@ func (server *Server) handleChannelStateMessage(client *Client, message *Message
 		}
 
 		// Links
-		linkadd := []*Channel{}
-		linkremove := []*Channel{}
-		if len(chanstate.LinksAdd) > 0 || len(chanstate.LinksRemove) > 0 {
-			// Client must have permission to link
-			if !acl.HasPermission(&channel.ACL, client, acl.LinkChannelPermission) {
-				client.sendPermissionDenied(client, channel, acl.LinkChannelPermission)
-				return
-			}
-			// Add any valid channels to linkremove slice
-			for _, cid := range chanstate.LinksRemove {
-				if iter, ok := server.Channels[uint32(cid)]; ok {
-					linkremove = append(linkremove, iter)
-				}
-			}
-			// Add any valid channels to linkadd slice
-			for _, cid := range chanstate.LinksAdd {
-				if iter, ok := server.Channels[uint32(cid)]; ok {
-					if !acl.HasPermission(&iter.ACL, client, acl.LinkChannelPermission) {
-						client.sendPermissionDenied(client, iter, acl.LinkChannelPermission)
-						return
-					}
-					linkadd = append(linkadd, iter)
-				}
-			}
-		}
+		// TODO: Why store it in both a struct and and just make variables?
+		linksAdded := []*Channel{}
+		linksRemoved := []*Channel{}
+		// TODO: If we are only checking if at least 1 length why count length over 1 position?
+		//if len(channelState.LinksAdded) > 0 || len(channelState.LinksRemoved) > 0 {
+		//	// Client must have permission to link
+		//	if !acl.HasPermission(&channel.ACL, client, acl.LinkChannelPermission) {
+		//		client.sendPermissionDenied(client, channel, acl.LinkChannelPermission)
+		//		return
+		//	}
+		//	// Add any valid channels to linkremove slice
+		//	for _, cid := range channelState.LinksRemoved {
+		//		if iter, ok := server.Channels[uint32(cid)]; ok {
+		//			linksRemoved = append(linksRemoved, iter)
+		//		}
+		//	}
+		//	// Add any valid channels to linkadd slice
+		//	for _, cid := range channelState.LinksAdded {
+		//		if iter, ok := server.Channels[uint32(cid)]; ok {
+		//			if !acl.HasPermission(&iter.ACL, client, acl.LinkChannelPermission) {
+		//				client.sendPermissionDenied(client, iter, acl.LinkChannelPermission)
+		//				return
+		//			}
+		//			linksAdded = append(linksAdded, iter)
+		//		}
+		//	}
+		//}
 
 		// Permission checks done!
 
@@ -432,124 +438,132 @@ func (server *Server) handleChannelStateMessage(client *Client, message *Message
 		}
 
 		// Rename
-		if chanstate.Name != nil {
-			channel.Name = *chanstate.Name
+		if channelState.Name != nil {
+			channel.Name = *channelState.Name
 		}
 
 		// Description change
-		if chanstate.Description != nil {
+		if channelState.Description != nil {
+			// TODO: This is a validation, so its own fucntion
+			// TODO: Checking just if not empty, so dont count every character in description
 			if len(description) == 0 {
 				channel.DescriptionBlob = ""
 			} else {
-				key, err := blobStore.Put([]byte(description))
-				if err != nil {
-					server.Panicf("Blobstore error: %v", err)
-				}
-				channel.DescriptionBlob = key
+				// TODO: uhh, no this is fucked
+				//key, err := blobStore.Put([]byte(description))
+				//if err != nil {
+				//	server.Panicf("Blobstore error: %v", err)
+				//}
+				//channel.DescriptionBlob = key
 			}
 		}
 
 		// Position change
-		if chanstate.Position != nil {
-			channel.Position = int(*chanstate.Position)
+		if channelState.Position != nil {
+			channel.Position = int(*channelState.Position)
 		}
 
 		// Add links
-		for _, iter := range linkadd {
+		for _, iter := range linksAdded {
 			server.LinkChannels(channel, iter)
 		}
 
 		// Remove links
-		for _, iter := range linkremove {
+		for _, iter := range linksRemoved {
 			server.UnlinkChannels(channel, iter)
 		}
 
 		// Broadcast the update
-		server.broadcastProtoMessageWithPredicate(chanstate, func(client *Client) bool {
+		server.broadcastProtoMessageWithPredicate(channelState, func(client *Client) bool {
 			return client.Version < 0x10202
 		})
 
 		// Remove description blob when sending to 1.2.2 >= users. Only send the blob hash.
 		if channel.HasDescription() {
-			chanstate.Description = nil
-			chanstate.DescriptionHash = channel.DescriptionBlobHashBytes()
+			channelState.Description = nil
+			channelState.DescriptionHash = channel.DescriptionBlobHashBytes()
 		}
-		chanstate.DescriptionHash = channel.DescriptionBlobHashBytes()
-		server.broadcastProtoMessageWithPredicate(chanstate, func(client *Client) bool {
+		channelState.DescriptionHash = channel.DescriptionBlobHashBytes()
+		server.broadcastProtoMessageWithPredicate(channelState, func(client *Client) bool {
 			return client.Version >= 0x10202
 		})
 	}
 
 	// Update channel in datastore
-	if !channel.IsTemporary() {
-		server.UpdateFrozenChannel(channel, chanstate)
-	}
+	// TODO: Freezing is dumb, call it writing and use a lib
+	//if !channel.IsTemporary() {
+	//	server.UpdateFrozenChannel(channel, channelState)
+	//}
 }
 
 // Handle a user remove packet. This can either be a client disconnecting, or a
 // user kicking or kick-banning another player.
-func (server *Server) handleUserRemoveMessage(client *Client, msg *Message) {
-	userremove := &mumbleproto.UserRemove{}
-	err := proto.Unmarshal(msg.buf, userremove)
+// TODO: Appears to be overuse of pointers?
+func (server *Server) handleUserRemoveMessage(removedClient *Client, message *Message) {
+	usersRemoved := &mumbleproto.UserRemove{}
+	err := proto.Unmarshal(message.buffer, usersRemoved)
 	if err != nil {
-		client.Panic(err)
+		removedClient.Panic(err)
 		return
 	}
 
 	// Get the client to be removed.
-	removeClient, ok := server.clients[*userremove.Session]
+	// TODO: Do we have the client we are going to remove or not at this point? Im so confused
+	removedClientSession := (*removedClient).Session()
+	removedClient, ok := server.clients[removedClientSession]
+	// TODO: Don't use ok, then use the error to pvodie the message!
 	if !ok {
-		client.Panic("Invalid session in UserRemove message")
+		removedClient.Panic("Invalid session in UserRemove message")
 		return
 	}
-
-	isBan := false
-	if userremove.Ban != nil {
-		isBan = *userremove.Ban
-	}
-
+	// Just checked if its banned from the pointer, not a local variable, thats just overcomplex
 	// Check client's permissions
-	perm := acl.Permission(acl.KickPermission)
-	if isBan {
-		perm = acl.Permission(acl.BanPermission)
-	}
-	rootChan := server.RootChannel()
-	if removeClient.IsSuperUser() || !acl.HasPermission(&rootChan.ACL, client, perm) {
-		client.sendPermissionDenied(client, rootChan, perm)
-		return
-	}
+	// TODO: Just commenting this out fix it later, this is a bad way anwyay
+	//clientPermissions := acl.Permission(acl.KickPermission)
+	//if isBanned {
+	//	permissionDenied = acl.Permission(acl.BanPermission)
+	//}
+	// TODO: haspermission needs revamping
+	RootChannel := server.RootChannel()
+	//if removedClient.IsSuperUser() || !acl.HasPermission(&rootChannel.ACL, removedClient, permissionDenied) {
+	//	client.sendPermissionDenied(client, rootChannel, permissionDenied)
+	//	return
+	//}
 
-	if isBan {
-		ban := ban.Ban{}
-		ban.IP = removeClient.conn.RemoteAddr().(*net.TCPAddr).IP
-		ban.Mask = 128
-		if userremove.Reason != nil {
-			ban.Reason = *userremove.Reason
-		}
-		ban.Username = removeClient.ShownName()
-		ban.CertHash = removeClient.CertHash()
-		ban.Start = time.Now().Unix()
-		ban.Duration = 0
+	isBanned := false
+	// TODO: isBanned handling should be be done not locally but from checking a struct value or db value
+	//if isBanned {
+	//	ban := ban.Ban{}
+	//	ban.IP = removedClient.connection.RemoteAddr().(*net.TCPAddr).IP
+	//	ban.Mask = 128
+	//	if removedUser.Reason != nil {
+	//		ban.Reason = *removedUser.Reason
+	//	}
+	//	ban.Username = removedClient.ShownName()
+	//	ban.CertificateHash = removedClient.CertificateHash()
+	//	ban.Start = time.Now().Unix()
+	//	ban.Duration = 0
 
-		server.banlock.Lock()
-		server.Bans = append(server.Bans, ban)
-		server.UpdateFrozenBans(server.Bans)
-		server.banlock.Unlock()
-	}
+	//	server.banLock.Lock()
+	//	server.Bans = append(server.Bans, ban)
+	//	server.UpdateFrozenBans(server.Bans)
+	//	server.banLock.Unlock()
+	//}
 
-	userremove.Actor = proto.Uint32(client.Session())
-	if err = server.broadcastProtoMessage(userremove); err != nil {
+	// Actor is just a uint32, whats the point here??
+	//removedClient.Actor = proto.Uint32(removedClient.Session())
+	if err = server.broadcastProtoMessage(removedClient); err != nil {
 		server.Panicf("Unable to broadcast UserRemove message")
 		return
 	}
 
-	if isBan {
-		client.Printf("Kick-banned %v (%v)", removeClient.ShownName(), removeClient.Session())
+	if isBanned {
+		removedClient.Printf("Kick-banned %v (%v)", removedClient.ShownName(), removedClient.Session())
 	} else {
-		client.Printf("Kicked %v (%v)", removeClient.ShownName(), removeClient.Session())
+		removedClient.Printf("Kicked %v (%v)", removedClient.ShownName(), removedClient.Session())
 	}
 
-	removeClient.ForceDisconnect()
+	removedClient.ForceDisconnect()
 }
 
 // Handle user state changes
@@ -581,30 +595,34 @@ func (server *Server) handleUserStateMessage(client *Client, message *Message) {
 	// Does it have a channel ID?
 	if userState.ChannelID != nil {
 		// Destination channel
-		dstChan, ok := server.Channels[uint32(*userState.ChannelID)]
+		destinationChannel, ok := server.Channels[int(*userState.ChannelID)]
 		if !ok {
 			return
 		}
 
 		// If the user and the actor aren't the same, check whether the actor has MovePermission on
 		// the user's curent channel.
-		if actor != target && !acl.HasPermission(&target.Channel.ACL, actor, acl.MovePermission) {
-			client.sendPermissionDenied(actor, target.Channel, acl.MovePermission)
-			return
-		}
+		// TODO: has permisison sucks
+		//if actor != target && !acl.HasPermission(&target.Channel.ACL, actor, acl.MovePermission) {
+		//	client.sendPermissionDenied(actor, target.Channel, acl.MovePermission)
+		//	return
+		//}
 
 		// Check whether the actor has MovePermission on dstChan.  Check whether user has EnterPermission
 		// on dstChan.
-		if !acl.HasPermission(&dstChan.ACL, actor, acl.MovePermission) && !acl.HasPermission(&dstChan.ACL, target, acl.EnterPermission) {
-			client.sendPermissionDenied(target, dstChan, acl.EnterPermission)
-			return
-		}
+		// TODO: has permisison sucks
+		//if !acl.HasPermission(&dstChan.ACL, actor, acl.MovePermission) && !acl.HasPermission(&destinationChannel.ACL, target, acl.EnterPermission) {
+		//	client.sendPermissionDenied(target, destinationChannel, acl.EnterPermission)
+		//	return
+		//}
 
 		// TODO: Since its already in the server config, no need for local variable
-		maxChannelUsers := server.config.MaxChannelUsers
-		if maxChannelUsers != 0 && len(dstChan.clients) >= maxChannelUsers {
-			client.sendPermissionDeniedFallback(mumbleproto.PermissionDenied_ChannelFull,
-				0x010201, "Channel is full")
+		// TODO: Umm why?
+		maxUsersPerChannel := server.config.MaxUsersPerChannel
+		// TODO just check if index exists at max value, no need to count every client
+		// TODO: Validation != 0
+		if maxUsersPerChannel != 0 && len(destinationChannel.clients) >= maxUsersPerChannel {
+			client.sendPermissionDeniedFallback(mumbleproto.PermissionDenied_ChannelFull, 0x010201, "Channel is full")
 			return
 		}
 	}
@@ -617,14 +635,15 @@ func (server *Server) handleUserStateMessage(client *Client, message *Message) {
 		}
 
 		// Check whether the actor has 'mutedeafen' permission on user's channel.
-		if !acl.HasPermission(&target.Channel.ACL, actor, acl.MuteDeafenPermission) {
-			client.sendPermissionDenied(actor, target.Channel, acl.MuteDeafenPermission)
-			return
-		}
+		// TODO: has permisison sucks
+		//if !HasPermission(&target.Channel.ACL, actor, MuteDeafenPermission) {
+		//	client.sendPermissionDenied(actor, target.Channel, MuteDeafenPermission)
+		//	return
+		//}
 
 		// Check if this was a suppress operation. Only the server can suppress users.
 		if userState.Suppress != nil {
-			client.sendPermissionDenied(actor, target.Channel, acl.MuteDeafenPermission)
+			client.sendPermissionDenied(actor, target.Channel, MuteDeafenPermission)
 			return
 		}
 	}
@@ -634,21 +653,24 @@ func (server *Server) handleUserStateMessage(client *Client, message *Message) {
 		comment := *userState.Comment
 
 		// Clearing another user's comment.
-		if target != actor {
-			// Check if actor has 'move' permissions on the root channel. It is needed
-			// to clear another user's comment.
-			rootChan := server.RootChannel()
-			if !acl.HasPermission(&rootChan.ACL, actor, acl.MovePermission) {
-				client.sendPermissionDenied(actor, rootChan, acl.MovePermission)
-				return
-			}
+		// TODO: rewrite
+		//if target.Session != userState.Actor {
+		// Check if actor has 'move' permissions on the root channel. It is needed
+		// to clear another user's comment.
+		//	rootChannel := server.RootChannel()
+		// TODO: has permisison sucks
+		//if !acl.HasPermission(&rootChan.ACL, actor, acl.MovePermission) {
+		//	client.sendPermissionDenied(actor, rootChannel, acl.MovePermission)
+		//	return
+		//}
 
-			// Only allow empty text.
-			if len(comment) > 0 {
-				client.sendPermissionDeniedType(mumbleproto.PermissionDenied_TextTooLong)
-				return
-			}
-		}
+		// Only allow empty text.
+		// TODO: Thats find (its a validation and should be in its own function! bu it should also not count the entire coment, just check if the index position is filled
+		//	if len(comment) > 0 {
+		//		client.sendPermissionDeniedType(mumbleproto.PermissionDenied_TextTooLong)
+		//		return
+		//	}
+		//}
 
 		filtered, err := server.FilterText(comment)
 		if err != nil {
@@ -673,16 +695,17 @@ func (server *Server) handleUserStateMessage(client *Client, message *Message) {
 	if userState.UserID != nil {
 		// If user == actor, check for SelfRegisterPermission on root channel.
 		// If user != actor, check for RegisterPermission permission on root channel.
-		perm := acl.Permission(acl.RegisterPermission)
+		registeredPermission := Permission(RegisterPermission)
 		if actor == target {
-			perm = acl.Permission(acl.SelfRegisterPermission)
+			registeredPermission = Permission(SelfRegisterPermission)
 		}
 
-		rootChan := server.RootChannel()
-		if target.IsRegistered() || !acl.HasPermission(&rootChan.ACL, actor, perm) {
-			client.sendPermissionDenied(actor, rootChan, perm)
-			return
-		}
+		rootChannel := server.RootChannel()
+		// TODO: Fix HasPermission
+		//if target.IsRegistered() || !&rootChannel.ACL.HasPermission(actor, registeredPermission) {
+		//	client.sendPermissionDenied(actor, rootChannel, registeredPermission)
+		//	return
+		//}
 
 		if !target.HasCertificate() {
 			client.sendPermissionDeniedTypeUser(mumbleproto.PermissionDenied_MissingCertificate, target)
@@ -700,105 +723,110 @@ func (server *Server) handleUserStateMessage(client *Client, message *Message) {
 	//      - PluginIdentity
 	//      - Recording
 	if actor != target && (userState.SelfDeaf != nil || userState.SelfMute != nil ||
-		userstate.Texture != nil || userstate.PluginContext != nil || userstate.PluginIdentity != nil ||
-		userstate.Recording != nil) {
+		userState.Texture != nil || userState.PluginContext != nil || userState.PluginIdentity != nil ||
+		userState.Recording != nil) {
 		client.Panic("Invalid UserState")
 		return
 	}
 
 	broadcast := false
 
-	if userstate.Texture != nil && target.user != nil {
-		key, err := blobStore.Put(userstate.Texture)
-		if err != nil {
-			server.Panicf("Blobstore error: %v", err)
-			return
-		}
+	// TODO: This is gross
+	if userState.Texture != nil && target.user != nil {
+		// TODO: lets just use a file writing lib
+		//key, err := blobStore.Put(userState.Texture)
+		//if err != nil {
+		//	server.Panicf("Blobstore error: %v", err)
+		//	return
+		//}
 
-		if target.user.TextureBlob != key {
-			target.user.TextureBlob = key
-		} else {
-			userstate.Texture = nil
-		}
+		// TODO: TextureBlob
+		//if target.user.TextureBlob != key {
+		//	target.user.TextureBlob = key
+		//} else {
+		//	userState.Texture = nil
+		//}
 
 		broadcast = true
 	}
 
-	if userstate.SelfDeaf != nil {
-		target.SelfDeaf = *userstate.SelfDeaf
+	if userState.SelfDeaf != nil {
+		target.SelfDeaf = *userState.SelfDeaf
 		if target.SelfDeaf {
-			userstate.SelfDeaf = proto.Bool(true)
+			userState.SelfDeaf = proto.Bool(true)
 			target.SelfMute = true
 		}
 		broadcast = true
 	}
 
-	if userstate.SelfMute != nil {
-		target.SelfMute = *userstate.SelfMute
+	if userState.SelfMute != nil {
+		target.SelfMute = *userState.SelfMute
 		if !target.SelfMute {
-			userstate.SelfDeaf = proto.Bool(false)
+			userState.SelfDeaf = proto.Bool(false)
 			target.SelfDeaf = false
 		}
 	}
 
-	if userstate.PluginContext != nil {
-		target.PluginContext = userstate.PluginContext
+	if userState.PluginContext != nil {
+		target.PluginContext = userState.PluginContext
 	}
 
-	if userstate.PluginIdentity != nil {
-		target.PluginIdentity = *userstate.PluginIdentity
+	if userState.PluginIdentity != nil {
+		target.PluginIdentity = *userState.PluginIdentity
 	}
 
-	if userstate.Comment != nil && target.user != nil {
-		key, err := blobStore.Put([]byte(*userstate.Comment))
-		if err != nil {
-			server.Panicf("Blobstore error: %v", err)
-		}
+	if userState.Comment != nil && target.user != nil {
+		// TODO: well replace blboStore anyways
+		//key, err := blobStore.Put([]byte(*userState.Comment))
+		//if err != nil {
+		//	server.Panicf("Blobstore error: %v", err)
+		//}
 
-		if target.user.CommentBlob != key {
-			target.user.CommentBlob = key
-		} else {
-			userstate.Comment = nil
-		}
+		//if target.user.CommentBlob != key {
+		//	target.user.CommentBlob = key
+		//} else {
+		//	userState.Comment = nil
+		//}
 
 		broadcast = true
 	}
 
-	if userstate.Mute != nil || userstate.Deaf != nil || userstate.Suppress != nil || userstate.PrioritySpeaker != nil {
-		if userstate.Deaf != nil {
-			target.Deaf = *userstate.Deaf
+	if userState.Mute != nil || userState.Deaf != nil || userState.Suppress != nil || userState.PrioritySpeaker != nil {
+		if userState.Deaf != nil {
+			target.Deaf = *userState.Deaf
 			if target.Deaf {
-				userstate.Mute = proto.Bool(true)
+				userState.Mute = proto.Bool(true)
 			}
 		}
-		if userstate.Mute != nil {
-			target.Mute = *userstate.Mute
+		if userState.Mute != nil {
+			target.Mute = *userState.Mute
 			if !target.Mute {
-				userstate.Deaf = proto.Bool(false)
+				userState.Deaf = proto.Bool(false)
 				target.Deaf = false
 			}
 		}
-		if userstate.Suppress != nil {
-			target.Suppress = *userstate.Suppress
+		if userState.Suppress != nil {
+			target.Suppress = *userState.Suppress
 		}
-		if userstate.PrioritySpeaker != nil {
-			target.PrioritySpeaker = *userstate.PrioritySpeaker
+		if userState.PrioritySpeaker != nil {
+			target.PrioritySpeaker = *userState.PrioritySpeaker
 		}
 		broadcast = true
 	}
 
-	if userstate.Recording != nil && *userstate.Recording != target.Recording {
-		target.Recording = *userstate.Recording
+	if userState.Recording != nil && *userState.Recording != target.Recording {
+		target.Recording = *userState.Recording
 
-		txtmsg := &mumbleproto.TextMessage{}
-		txtmsg.TreeId = append(txtmsg.TreeId, uint32(0))
+		textMessage := &mumbleproto.TextMessage{}
+		textMessage.TreeID = append(textMessage.TreeID, uint32(0))
 		if target.Recording {
-			txtmsg.Message = proto.String(fmt.Sprintf("User '%s' started recording", target.ShownName()))
+			// TODO: Should be bodynot message if the object is called message, or content or payload or data
+			textMessage.Message = proto.String(fmt.Sprintf("User '%s' started recording", target.ShownName()))
 		} else {
-			txtmsg.Message = proto.String(fmt.Sprintf("User '%s' stopped recording", target.ShownName()))
+			textMessage.Message = proto.String(fmt.Sprintf("User '%s' stopped recording", target.ShownName()))
 		}
 
-		server.broadcastProtoMessageWithPredicate(txtmsg, func(client *Client) bool {
+		server.broadcastProtoMessageWithPredicate(textMessage, func(client *Client) bool {
 			return client.Version < 0x10203
 		})
 
@@ -806,23 +834,24 @@ func (server *Server) handleUserStateMessage(client *Client, message *Message) {
 	}
 
 	userRegistrationChanged := false
-	if userstate.UserId != nil {
+	if userState.UserID != nil {
 		uid, err := server.RegisterClient(target)
 		if err != nil {
 			client.Printf("Unable to register: %v", err)
-			userstate.UserId = nil
+			userState.UserID = nil
 		} else {
-			userstate.UserId = proto.Uint32(uid)
+			userState.UserID = proto.Uint32(uid)
 			client.user = server.Users[uid]
 			userRegistrationChanged = true
 		}
 		broadcast = true
 	}
 
-	if userstate.ChannelId != nil {
-		channel, ok := server.Channels[int(*userstate.ChannelId)]
+	if userState.ChannelID != nil {
+		channel, ok := server.Channels[int(*userState.ChannelID)]
+		// TODO: No not ok, use error, then you can actually inform dev/user/admin whats the fuck is going on
 		if ok {
-			server.userEnterChannel(target, channel, userstate)
+			server.userEnterChannel(target, channel, userState)
 			broadcast = true
 		}
 	}
@@ -832,26 +861,26 @@ func (server *Server) handleUserStateMessage(client *Client, message *Message) {
 		// Mumble and Murmur used qCompress and qUncompress from Qt to compress
 		// textures that were sent over the wire. We can use this to determine
 		// whether a texture is a "new style" or an "old style" texture.
-		texture := userstate.Texture
-		texlen := uint32(0)
+		texture := userState.Texture
+		textureLength := uint32(0)
 		if texture != nil && len(texture) > 4 {
-			texlen = uint32(texture[0])<<24 | uint32(texture[1])<<16 | uint32(texture[2])<<8 | uint32(texture[3])
+			textureLength = uint32(texture[0])<<24 | uint32(texture[1])<<16 | uint32(texture[2])<<8 | uint32(texture[3])
 		}
-		if texture != nil && len(texture) > 4 && texlen != 600*60*4 {
+		if texture != nil && len(texture) > 4 && textureLength != 600*60*4 {
 			// The sent texture is a new-style texture.  Strip it from the message
 			// we send to pre-1.2.2 clients.
-			userstate.Texture = nil
-			err := server.broadcastProtoMessageWithPredicate(userstate, func(client *Client) bool {
+			userState.Texture = nil
+			err := server.broadcastProtoMessageWithPredicate(userState, func(client *Client) bool {
 				return client.Version < 0x10202
 			})
 			if err != nil {
 				server.Panic("Unable to broadcast UserState")
 			}
 			// Re-add it to the message, so that 1.2.2+ clients *do* get the new-style texture.
-			userstate.Texture = texture
+			userState.Texture = texture
 		} else {
 			// Old style texture.  We can send the message as-is.
-			err := server.broadcastProtoMessageWithPredicate(userstate, func(client *Client) bool {
+			err := server.broadcastProtoMessageWithPredicate(userState, func(client *Client) bool {
 				return client.Version < 0x10202
 			})
 			if err != nil {
@@ -862,28 +891,28 @@ func (server *Server) handleUserStateMessage(client *Client, message *Message) {
 		// If a texture hash is set on user, we transmit that instead of
 		// the texture itself. This allows the client to intelligently fetch
 		// the blobs that it does not already have in its local storage.
-		if userstate.Texture != nil && target.user != nil && target.user.HasTexture() {
-			userstate.Texture = nil
-			userstate.TextureHash = target.user.TextureBlobHashBytes()
+		if userState.Texture != nil && target.user != nil && target.user.HasTexture() {
+			userState.Texture = nil
+			userState.TextureHash = target.user.TextureBlobHashBytes()
 		} else if target.user == nil {
-			userstate.Texture = nil
-			userstate.TextureHash = nil
+			userState.Texture = nil
+			userState.TextureHash = nil
 		}
 
 		// Ditto for comments.
-		if userstate.Comment != nil && target.user.HasComment() {
-			userstate.Comment = nil
-			userstate.CommentHash = target.user.CommentBlobHashBytes()
+		if userState.Comment != nil && target.user.HasComment() {
+			userState.Comment = nil
+			userState.CommentHash = target.user.CommentBlobHashBytes()
 		} else if target.user == nil {
-			userstate.Comment = nil
-			userstate.CommentHash = nil
+			userState.Comment = nil
+			userState.CommentHash = nil
 		}
 
 		if userRegistrationChanged {
 			server.ClearCaches()
 		}
 
-		err := server.broadcastProtoMessageWithPredicate(userstate, func(client *Client) bool {
+		err := server.broadcastProtoMessageWithPredicate(userState, func(client *Client) bool {
 			return client.Version >= 0x10203
 		})
 		if err != nil {
@@ -891,59 +920,61 @@ func (server *Server) handleUserStateMessage(client *Client, message *Message) {
 		}
 	}
 
-	if target.IsRegistered() {
-		server.UpdateFrozenUser(target, userstate)
-	}
+	// TODO: Change freezing to writing to file, or use db
+	//if target.IsRegistered() {
+	//	server.UpdateFrozenUser(target, userState)
+	//}
 }
 
 func (server *Server) handleBanListMessage(client *Client, message *Message) {
-	banlist := &mumbleproto.BanList{}
-	err := proto.Unmarshal(message.buffer, banlist)
+	banList := &mumbleproto.BanList{}
+	err := proto.Unmarshal(message.buffer, banList)
 	if err != nil {
 		client.Panic(err)
 		return
 	}
 
-	rootChan := server.RootChannel()
-	if !acl.HasPermission(&rootChan.ACL, client, acl.BanPermission) {
-		client.sendPermissionDenied(client, rootChan, acl.BanPermission)
-		return
-	}
+	rootChannel := server.RootChannel()
+	// TODO: Fix HasPermission
+	//if !&rootChannel.ACL.HasPermission(client, BanPermission) {
+	//	client.sendPermissionDenied(client, rootChannel, BanPermission)
+	//	return
+	//}
 
-	if banlist.Query != nil && *banlist.Query != false {
-		banlist.Reset()
+	if banList.Query != nil && *banList.Query != false {
+		banList.Reset()
 
-		server.banlock.RLock()
-		defer server.banlock.RUnlock()
+		server.banLock.RLock()
+		defer server.banLock.RUnlock()
 
 		for _, ban := range server.Bans {
 			entry := &mumbleproto.BanList_BanEntry{}
 			entry.Address = ban.IP
 			entry.Mask = proto.Uint32(uint32(ban.Mask))
 			entry.Name = proto.String(ban.Username)
-			entry.Hash = proto.String(ban.CertHash)
+			entry.Hash = proto.String(ban.CertificateHash)
 			entry.Reason = proto.String(ban.Reason)
 			entry.Start = proto.String(ban.ISOStartDate())
 			entry.Duration = proto.Uint32(ban.Duration)
-			banlist.Bans = append(banlist.Bans, entry)
+			banList.Bans = append(banList.Bans, entry)
 		}
-		if err := client.sendMessage(banlist); err != nil {
+		if err := client.sendMessage(banList); err != nil {
 			client.Panic("Unable to send BanList")
 		}
 	} else {
-		server.banlock.Lock()
-		defer server.banlock.Unlock()
+		server.banLock.Lock()
+		defer server.banLock.Unlock()
 
 		server.Bans = server.Bans[0:0]
-		for _, entry := range banlist.Bans {
-			ban := ban.Ban{}
+		for _, entry := range banList.Bans {
+			ban := Ban{}
 			ban.IP = entry.Address
 			ban.Mask = int(*entry.Mask)
 			if entry.Name != nil {
 				ban.Username = *entry.Name
 			}
 			if entry.Hash != nil {
-				ban.CertHash = *entry.Hash
+				ban.CertificateHash = *entry.Hash
 			}
 			if entry.Reason != nil {
 				ban.Reason = *entry.Reason
@@ -959,38 +990,41 @@ func (server *Server) handleBanListMessage(client *Client, message *Message) {
 
 		server.UpdateFrozenBans(server.Bans)
 
-		client.Printf("Banlist updated")
+		client.Printf("BanList updated")
 	}
 }
 
 // Broadcast text messages
 func (server *Server) handleTextMessage(client *Client, message *Message) {
-	txtmsg := &mumbleproto.TextMessage{}
+	textMessage := &mumbleproto.TextMessage{}
 	err := proto.Unmarshal(message.buffer, textMessage)
 	if err != nil {
 		client.Panic(err)
 		return
 	}
 
-	filtered, err := server.FilterText(*txtmsg.Message)
+	filtered, err := server.FilterText(*textMessage.Message)
 	if err != nil {
 		client.sendPermissionDeniedType(mumbleproto.PermissionDenied_TextTooLong)
 		return
 	}
 
+	// TODO: Don't count entirely, we just want to know if there is something a position 0
 	if len(filtered) == 0 {
 		return
 	}
 
-	txtmsg.Message = proto.String(filtered)
+	// TODO: Message has attribute message? No it has attribute body, content, data ...
+	textMessage.Message = proto.String(filtered)
 
 	clients := make(map[uint32]*Client)
 
 	// Tree
-	for _, chanid := range txtmsg.TreeId {
-		if channel, ok := server.Channels[int(chanid)]; ok {
-			if !acl.HasPermission(&channel.ACL, client, acl.TextMessagePermission) {
-				client.sendPermissionDenied(client, channel, acl.TextMessagePermission)
+	for _, channelID := range textMessage.TreeID {
+		// TODO: Using okay doesnt give you the opportunity to explain wtf is ahppening
+		if channel, ok := server.Channels[int(channelID)]; ok {
+			if !&channel.ACL.HasPermission(client, TextMessagePermission) {
+				client.sendPermissionDenied(client, channel, TextMessagePermission)
 				return
 			}
 			for _, target := range channel.clients {
@@ -1000,10 +1034,10 @@ func (server *Server) handleTextMessage(client *Client, message *Message) {
 	}
 
 	// Direct-to-channel
-	for _, chanid := range txtmsg.ChannelId {
-		if channel, ok := server.Channels[int(chanid)]; ok {
-			if !acl.HasPermission(&channel.ACL, client, acl.TextMessagePermission) {
-				client.sendPermissionDenied(client, channel, acl.TextMessagePermission)
+	for _, channelID := range textMessage.ChannelID {
+		if channel, ok := server.Channels[int(channelID)]; ok {
+			if !&channel.ACL.HasPermission(client, TextMessagePermission) {
+				client.sendPermissionDenied(client, channel, TextMessagePermission)
 				return
 			}
 			for _, target := range channel.clients {
@@ -1013,10 +1047,11 @@ func (server *Server) handleTextMessage(client *Client, message *Message) {
 	}
 
 	// Direct-to-clients
-	for _, session := range txtmsg.Session {
+	for _, session := range textMessage.Session {
+		// TODO: Fuck dont use ok, this doesnt provide info for the damonized server or dev
 		if target, ok := server.clients[session]; ok {
-			if !acl.HasPermission(&target.Channel.ACL, client, acl.TextMessagePermission) {
-				client.sendPermissionDenied(client, target.Channel, acl.TextMessagePermission)
+			if !&target.Channel.ACL.HasPermission(client, TextMessagePermission) {
+				client.sendPermissionDenied(client, target.Channel, TextMessagePermission)
 				return
 			}
 			clients[session] = target
@@ -1029,7 +1064,7 @@ func (server *Server) handleTextMessage(client *Client, message *Message) {
 	for _, target := range clients {
 		target.sendMessage(&mumbleproto.TextMessage{
 			Actor:   proto.Uint32(client.Session()),
-			Message: txtmsg.Message,
+			Message: textMessage.Message,
 		})
 	}
 }
@@ -1051,20 +1086,20 @@ func (server *Server) handleAclMessage(client *Client, message *Message) {
 	}
 
 	// Does the user have permission to update or look at ACLs?
-	if !acl.HasPermission(&channel.acl, client, acl.WritePermission) && !(channel.parent != nil && acl.HasPermission(&channel.parent.acl, client, acl.WritePermission)) {
-		client.sendPermissionDenied(client, channel, acl.WritePermission)
+	if !&channel.acl.HasPermission(client, WritePermission) && !(channel.parent != nil && &channel.parent.acl.HasPermission(client, WritePermission)) {
+		client.sendPermissionDenied(client, channel, WritePermission)
 		return
 	}
 
 	reply := &mumbleproto.ACL{}
-	reply.ChannelId = channel.ID
+	reply.ChannelID = channel.ID
 
 	channels := []*Channel{}
 	users := map[int]bool{}
 
 	// Query the current ACL state for the channel
-	if acl.Query != nil && *acl.Query != false {
-		reply.InheritAcls = proto.Bool(channel.ACL.InheritACL)
+	if Query != nil && *Query != false {
+		reply.InheritACLs = proto.Bool(channel.ACL.InheritACL)
 		// Walk the channel tree to get all relevant channels.
 		// (Stop if we reach a channel that doesn't have the InheritACL flag set)
 		// TODO: no, thats not necessary
@@ -1082,7 +1117,7 @@ func (server *Server) handleAclMessage(client *Client, message *Message) {
 
 		// Construct the protobuf ChanACL objects corresponding to the ACLs defined
 		// in our channel list.
-		reply.Acls = []*mumbleproto.ACL_ChanACL{}
+		reply.ACLs = []*mumbleproto.ACL_ChanACL{}
 		// TODO: just use proper storage, it will make the code smaller, eaiser to manage
 		// Logic that does a specific task? Make it a function, it will make testing actually possible
 		for _, channel := range channels {
@@ -1118,8 +1153,8 @@ func (server *Server) handleAclMessage(client *Client, message *Message) {
 			// TODO: FIX THIS!
 			// Initializing all of these varialbles EVERYTIME through this god damn loop!
 			var (
-				group          acl.Group
-				parentGroup    acl.Group
+				group          Group
+				parentGroup    Group
 				hasGroup       bool
 				hasParentGroup bool
 			)
@@ -1181,7 +1216,7 @@ func (server *Server) handleAclMessage(client *Client, message *Message) {
 		// Map the user ids in the user map to usernames of users.
 		queryUsers := &mumbleproto.QueryUsers{}
 		for uid, _ := range users {
-			user, ok := server.Users[uint32(uid)]
+			user, ok := server.Users[uid]
 			if !ok {
 				client.Printf("Invalid user id in ACL")
 				continue

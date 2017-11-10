@@ -10,12 +10,12 @@ import (
 )
 
 var (
-	// ErrNoSuchKey signals that a blob with the given key does
+	// ErrorNoSuchKey signals that a blob with the given key does
 	// not exist in the BlobStore.
-	ErrNoSuchKey = errors.New("blobstore: no such key")
+	ErrorNoSuchKey = errors.New("blobStore: no such key")
 
-	// ErrBadKey signals that the given key is not well formed.
-	ErrBadKey = errors.New("blobstore: bad key")
+	// ErrorBadKey signals that the given key is not well formed.
+	ErrorBadKey = errors.New("blobStore: bad key")
 )
 
 // BlobStore represents a simple disk-persisted content addressible
@@ -66,13 +66,13 @@ func isValidKey(key string) bool {
 	return true
 }
 
-// extractKeyComponents returns the directory and the filename that the
+// extractKeyComponents returns the directory and the fileName that the
 // blob identified by key should be stored under in the BlobStore.
 // This function also checks whether the key is valid. If not, it returns
 // ErrBadKey.
-func extractKeyComponents(key string) (directory string, filename string, err error) {
+func extractKeyComponents(key string) (directory string, fileName string, err error) {
 	if !isValidKey(key) {
-		return "", "", ErrBadKey
+		return "", "", ErrorBadKey
 	}
 	return key[0:2], key, nil
 }
@@ -82,39 +82,40 @@ func extractKeyComponents(key string) (directory string, filename string, err er
 // BlobStoreGet returns ErrNoSuchKey.
 // TODO: Can we just use a key/value store bitte?
 func BlobStoreGet(key string) ([]byte, error) {
-	directory, filename, err := extractKeyComponents(key)
+	directory, fileName, err := extractKeyComponents(key)
 	if err != nil {
 		return nil, err
 	}
 
 	// TODO: two dir what?
-	blobfn := filepath.Join(dir, dir, fn)
-	f, err := os.Open(blobfn)
+	blobFileName := filepath.Join(directory, fileName)
+	file, err := os.Open(blobFileName)
 	if os.IsNotExist(err) {
-		return nil, ErrNoSuchKey
+		return nil, ErrorNoSuchKey
 	} else if err != nil {
 		return nil, err
 	}
 
-	br, err := newBlobReader(f, key)
+	blobReader, err := newBlobReader(file, key)
 	if err != nil {
-		f.Close()
+		file.Close()
 		return nil, err
 	}
-	defer br.Close()
+	defer blobReader.Close()
 
-	buf, err := ioutil.ReadAll(br)
+	buffer, err := ioutil.ReadAll(blobReader)
 	if err != nil {
 		return nil, err
 	}
 
-	return buf, nil
+	return buffer, nil
 }
 
 // Put puts the contents of blob into the BlobStore. If
 // the blob was successfully stored, the returned key can
 // be used to retrieve the buf from the BlobStore at a
 // later time.
+// TODO: If this is goign to be a method, it doesnt need BlobStore in the title, but why does this work with puts but not get? need consistencey
 func (blobStore BlobStore) BlobStorePut(buffer []byte) (key string, err error) {
 	// Calculate the key for the blob.  We can't really delay it more than this,
 	// since we need to know the key for the blob to check whether it's already on
@@ -129,13 +130,13 @@ func (blobStore BlobStore) BlobStorePut(buffer []byte) (key string, err error) {
 
 	// BlobstoreGet the components that make up the on-disk
 	// path for the blob.
-	directory, filename, err := extractKeyComponents(key)
+	directory, fileName, err := extractKeyComponents(key)
 	if err != nil {
 		return "", err
 	}
 
 	blobDirectory := filepath.Join(blobStore.directory, directory)
-	blobPath := filepath.Join(blobDirectory, filename)
+	blobPath := filepath.Join(blobDirectory, fileName)
 
 	// Check if the blob already exists.
 	_, err = os.Stat(blobPath)
@@ -164,12 +165,14 @@ func (blobStore BlobStore) BlobStorePut(buffer []byte) (key string, err error) {
 	// the same blob at the same time. This shouldn't affect
 	// the consistency of the final blob, but worst case, we've
 	// done some extra work.
-	file, err := ioutil.TempFile(blobDirectory, filename)
+
+	// TODO: remove all this for lib
+	file, err := ioutil.TempFile(blobDirectory, fileName)
 	if err != nil {
 		return "", err
 	}
 
-	temporaryFilename := file.Name()
+	temporaryFileName := file.Name()
 	_, err = file.Write(buffer)
 	if err != nil {
 		file.Close()
@@ -187,9 +190,9 @@ func (blobStore BlobStore) BlobStorePut(buffer []byte) (key string, err error) {
 		return "", err
 	}
 
-	err = os.Rename(temporaryFilename, blobPath)
+	err = os.Rename(temporaryFileName, blobPath)
 	if err != nil {
-		os.Remove(temporaryFilename)
+		os.Remove(temporaryFileName)
 		return "", err
 	}
 

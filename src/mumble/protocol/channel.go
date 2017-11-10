@@ -6,35 +6,35 @@ import (
 
 // A Mumble channel
 type Channel struct {
-	ID       int
+	ID       uint32
 	Name     string
 	Position int
 
 	temporary bool
 	clients   map[uint32]*Client
 	parent    *Channel
-	children  map[int]*Channel
+	children  map[uint32]*Channel
 
 	// ACL - Access control list
 	ACL acl
 
 	// Links
-	Links map[int]*Channel
+	Links map[uint32]*Channel
 
 	// Blobs
 	// TODO: Why not use the Blob object? Lol seriously, whats the point of the blob object then?
 	DescriptionBlob string
 }
 
-func NewChannel(id int, name string) (channel *Channel) {
+func NewChannel(id uint32, name string) (channel *Channel) {
 	channel = new(Channel)
 	channel.ID = id
 	channel.Name = name
 	channel.clients = make(map[uint32]*Client)
-	channel.children = make(map[int]*Channel)
+	channel.children = make(map[uint32]*Channel)
 	// TODO: Switched to map[string]string since acl.Group is just a string
 	channel.ACL.Groups = make(map[string]string)
-	channel.Links = make(map[int]*Channel)
+	channel.Links = make(map[uint32]*Channel)
 	return
 }
 
@@ -71,23 +71,24 @@ func (channel *Channel) RemoveClient(client *Client) {
 
 // Does the channel have a description?
 func (channel *Channel) HasDescription() bool {
+	// TODO: Dont need to count every character of a block if you are just validaing its not empty
 	return len(channel.DescriptionBlob) > 0
 }
 
 // Get the channel's blob hash as a byte slice for sending via a protobuf message.
 // Returns nil if there is no blob.
-func (channel *Channel) DescriptionBlobHashBytes() (buf []byte) {
-	buf, err := hex.DecodeString(channel.DescriptionBlob)
+func (channel *Channel) DescriptionBlobHashBytes() (buffer []byte) {
+	buffer, err := hex.DecodeString(channel.DescriptionBlob)
 	if err != nil {
 		return nil
 	}
-	return buf
+	return buffer
 }
 
 // Returns a slice of all channels in this channel's
 // link chain.
-func (channel *Channel) AllLinks() (seen map[int]*Channel) {
-	seen = make(map[int]*Channel)
+func (channel *Channel) AllLinks() (seen map[uint32]*Channel) {
+	seen = make(map[uint32]*Channel)
 	walk := []*Channel{channel}
 	for len(walk) > 0 {
 		current := walk[len(walk)-1]
@@ -103,8 +104,8 @@ func (channel *Channel) AllLinks() (seen map[int]*Channel) {
 }
 
 // Returns a slice of all of this channel's subchannels.
-func (channel *Channel) AllSubChannels() (seen map[int]*Channel) {
-	seen = make(map[int]*Channel)
+func (channel *Channel) AllSubChannels() (seen map[uint32]*Channel) {
+	seen = make(map[uint32]*Channel)
 	walk := []*Channel{}
 	if len(channel.children) > 0 {
 		walk = append(walk, channel)
@@ -129,5 +130,6 @@ func (channel *Channel) IsTemporary() bool {
 
 // Checks whether the channel is temporary
 func (channel *Channel) IsEmpty() bool {
+	// TODO: checking if not empty? ok but dont count every client to do that
 	return len(channel.clients) == 0
 }

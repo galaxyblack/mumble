@@ -92,6 +92,9 @@ type Client struct {
 	session         uint32
 	certificateHash string
 	tokens          []string
+
+	// mumbleprotocol
+	Actor uint32
 }
 
 // Debugf implements debug-level printing for Clients.
@@ -141,14 +144,14 @@ func (client *Client) Tokens() []string {
 
 // Get the User ID of this client.
 // Returns -1 if the client is not a registered user.
-func (client *Client) UserID() int {
+func (client *Client) UserID() uint32 {
 	// TODO: Third fucking time we did this check, come on, lets make validating functions and use them for consistent functionality, smaller code footprint and easier testing!
 	if client.user == nil {
-		// TODO: No, lets not plz
-		return -1
+		// TODO: No, lets not plz, was doing -1 but doing 0 for now just to comply and build
+		return 0
 	}
 	// TODO: Seriously why are we returning it as an int? Just use a bool and only have uints32 so we dont convert 500 times
-	return int(client.user.ID)
+	return client.user.ID
 }
 
 // Get the client's shown name.
@@ -222,14 +225,15 @@ func (client *Client) ForceDisconnect() {
 
 // Clear the client's caches
 func (client *Client) ClearCaches() {
-	for _, vt := range client.voiceTargets {
-		vt.ClearCache()
+	for _, voiceTarget := range client.voiceTargets {
+		voiceTarget.ClearCache()
 	}
 }
 
 // Reject an authentication attempt
 func (client *Client) RejectAuth(rejectType mumbleproto.Reject_RejectType, reason string) {
 	var reasonString *string = nil
+	// TODO: Validation, so new function, and checking empty doesnt require counting all chars in reason
 	if len(reason) > 0 {
 		reasonString = proto.String(reason)
 	}
@@ -285,13 +289,13 @@ func (c *Client) sendPermissionDeniedType(denyType mumbleproto.PermissionDenied_
 
 // Send permission denied by type (and user)
 func (c *Client) sendPermissionDeniedTypeUser(denyType mumbleproto.PermissionDenied_DenyType, user *Client) {
-	pd := &mumbleproto.PermissionDenied{
+	permissionDenied := &mumbleproto.PermissionDenied{
 		Type: denyType.Enum(),
 	}
 	if user != nil {
-		pd.Session = proto.Uint32(uint32(user.Session()))
+		permissionDenied.Session = proto.Uint32(user.Session())
 	}
-	err := c.sendMessage(pd)
+	err := c.sendMessage(permissionDenied)
 	if err != nil {
 		c.Panicf("%v", err.Error())
 		return
@@ -302,7 +306,7 @@ func (c *Client) sendPermissionDeniedTypeUser(denyType mumbleproto.PermissionDen
 func (c *Client) sendPermissionDenied(who *Client, where *Channel, what uint32) {
 	permissionDenied := &mumbleproto.PermissionDenied{
 		Permission: proto.Uint32(uint32(what)),
-		ChannelID:  proto.Uint32(uint32(where.ID)),
+		ChannelID:  proto.Uint32(where.ID),
 		Session:    proto.Uint32(who.Session()),
 		Type:       mumbleproto.PermissionDenied_Permission.Enum(),
 	}
@@ -531,7 +535,7 @@ func (client *Client) tlsReceiveLoop() {
 				// TODO: What was the point of making a version const when we are going to hardcode it everywhere?
 				Version: proto.Uint32(0x10205),
 				// TODO: Okay again, why are we not using a const?
-				Release:     proto.String("Mumble"),
+				Release:     proto.String("Mumble Server"),
 				CryptoModes: SupportedModes(),
 			}
 			if client.server.config.BoolValue("SendOSInfo") {
