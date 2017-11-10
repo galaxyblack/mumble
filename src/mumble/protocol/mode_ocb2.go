@@ -12,7 +12,7 @@ type ocb2Mode struct {
 
 // NonceSize returns the nonce size to be used with OCB2-AES128.
 func (ocb *ocb2Mode) NonceSize() int {
-	return ocb2.NonceSize
+	return NonceSize
 }
 
 // KeySize returns the key size to be used with OCB2-AES128.
@@ -47,7 +47,7 @@ func (ocb *ocb2Mode) Encrypt(dst []byte, src []byte, nonce []byte) {
 
 	tag := dst[0:3]
 	dst = dst[3:]
-	ocb2.Encrypt(ocb.cipher, dst, src, nonce, tag)
+	Encrypt(ocb.cipher, dst, src, nonce, tag)
 }
 
 // Decrypt decrypts a message using OCB2-AES128 and outputs it to dst.
@@ -59,5 +59,5 @@ func (ocb *ocb2Mode) Decrypt(dst []byte, src []byte, nonce []byte) bool {
 
 	tag := src[0:3]
 	src = src[3:]
-	return ocb2.Decrypt(ocb.cipher, dst, src, nonce, tag)
+	return Decrypt(ocb.cipher, dst, src, nonce, tag)
 }

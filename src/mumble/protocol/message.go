@@ -988,7 +988,8 @@ func (server *Server) handleBanListMessage(client *Client, message *Message) {
 			server.Bans = append(server.Bans, ban)
 		}
 
-		server.UpdateFrozenBans(server.Bans)
+		// TODO: Remove frozen bans
+		//server.UpdateFrozenBans(server.Bans)
 
 		client.Printf("BanList updated")
 	}
@@ -1023,10 +1024,11 @@ func (server *Server) handleTextMessage(client *Client, message *Message) {
 	for _, channelID := range textMessage.TreeID {
 		// TODO: Using okay doesnt give you the opportunity to explain wtf is ahppening
 		if channel, ok := server.Channels[int(channelID)]; ok {
-			if !&channel.ACL.HasPermission(client, TextMessagePermission) {
-				client.sendPermissionDenied(client, channel, TextMessagePermission)
-				return
-			}
+			// TODO: Update hasPermission
+			//if !&channel.ACL.HasPermission(client, TextMessagePermission) {
+			//	client.sendPermissionDenied(client, channel, TextMessagePermission)
+			//	return
+			//}
 			for _, target := range channel.clients {
 				clients[target.Session()] = target
 			}
@@ -1036,10 +1038,11 @@ func (server *Server) handleTextMessage(client *Client, message *Message) {
 	// Direct-to-channel
 	for _, channelID := range textMessage.ChannelID {
 		if channel, ok := server.Channels[int(channelID)]; ok {
-			if !&channel.ACL.HasPermission(client, TextMessagePermission) {
-				client.sendPermissionDenied(client, channel, TextMessagePermission)
-				return
-			}
+			// TODO: HasPermission update
+			//if !&channel.ACL.HasPermission(client, TextMessagePermission) {
+			//	client.sendPermissionDenied(client, channel, TextMessagePermission)
+			//	return
+			//}
 			for _, target := range channel.clients {
 				clients[target.Session()] = target
 			}
@@ -1050,10 +1053,11 @@ func (server *Server) handleTextMessage(client *Client, message *Message) {
 	for _, session := range textMessage.Session {
 		// TODO: Fuck dont use ok, this doesnt provide info for the damonized server or dev
 		if target, ok := server.clients[session]; ok {
-			if !&target.Channel.ACL.HasPermission(client, TextMessagePermission) {
-				client.sendPermissionDenied(client, target.Channel, TextMessagePermission)
-				return
-			}
+			// TODO: HasPermission update
+			//if !&target.Channel.ACL.HasPermission(client, TextMessagePermission) {
+			//	client.sendPermissionDenied(client, target.Channel, TextMessagePermission)
+			//	return
+			//}
 			clients[session] = target
 		}
 	}
@@ -1086,226 +1090,228 @@ func (server *Server) handleAclMessage(client *Client, message *Message) {
 	}
 
 	// Does the user have permission to update or look at ACLs?
-	if !&channel.acl.HasPermission(client, WritePermission) && !(channel.parent != nil && &channel.parent.acl.HasPermission(client, WritePermission)) {
-		client.sendPermissionDenied(client, channel, WritePermission)
-		return
-	}
+	// TODO: HasPermission update
+	//if !&channel.acl.HasPermission(client, WritePermission) && !(channel.parent != nil && &channel.parent.acl.HasPermission(client, WritePermission)) {
+	//	client.sendPermissionDenied(client, channel, WritePermission)
+	//	return
+	//}
 
 	reply := &mumbleproto.ACL{}
-	reply.ChannelID = channel.ID
+	reply.ChannelID = &channel.ID
 
 	channels := []*Channel{}
 	users := map[int]bool{}
 
+	// TODO: Ughh just comment all this bullshit out until I can fix the structure shit
 	// Query the current ACL state for the channel
-	if Query != nil && *Query != false {
-		reply.InheritACLs = proto.Bool(channel.ACL.InheritACL)
-		// Walk the channel tree to get all relevant channels.
-		// (Stop if we reach a channel that doesn't have the InheritACL flag set)
-		// TODO: no, thats not necessary
-		cacheChannel := channel
-		for cacheChannel != nil {
-			channels = append([]*Channel{cacheChannel}, channels...)
-			if cacheChannel == channel || cacheChannel.ACL.InheritACL {
-				// TODO: Doesn't seem right either
-				cacheChannel = cacheChannel.parent
-			} else {
-				// TODO: Can't be right
-				cacheChannel = nil
-			}
-		}
+	//if Query != nil && *Query != false {
+	//	reply.InheritACLs = proto.Bool(channel.ACL.InheritACL)
+	//	// Walk the channel tree to get all relevant channels.
+	//	// (Stop if we reach a channel that doesn't have the InheritACL flag set)
+	//	// TODO: no, thats not necessary
+	//	cacheChannel := channel
+	//	for cacheChannel != nil {
+	//		channels = append([]*Channel{cacheChannel}, channels...)
+	//		if cacheChannel == channel || cacheChannel.ACL.InheritACL {
+	//			// TODO: Doesn't seem right either
+	//			cacheChannel = cacheChannel.parent
+	//		} else {
+	//			// TODO: Can't be right
+	//			cacheChannel = nil
+	//		}
+	//	}
 
-		// Construct the protobuf ChanACL objects corresponding to the ACLs defined
-		// in our channel list.
-		reply.ACLs = []*mumbleproto.ACL_ChanACL{}
-		// TODO: just use proper storage, it will make the code smaller, eaiser to manage
-		// Logic that does a specific task? Make it a function, it will make testing actually possible
-		for _, channel := range channels {
-			for _, childChannel := range channel.ACL.ACLs {
-				if childChannel == channel || childChannel.ApplySubs {
-					channelACL := &mumbleproto.ACL_ChanACL{}
-					// TODO: lol no
-					channelACL.Inherited = proto.Bool(channel != channel)
-					channelACL.ApplyHere = proto.Bool(childChannel.ApplyHere)
-					channelACL.ApplySubs = proto.Bool(childChannel.ApplySubs)
-					if childChannel.UserID >= 0 {
-						channelACL.UserID = childChannel.UserID
-						users[childChannel.UserID] = true
-					} else {
-						channelACL.Group = proto.String(childChannel.Group)
-					}
-					channelACL.Grant = proto.Uint32(uint32(childChannel.Allow))
-					channelACL.Deny = proto.Uint32(uint32(childChannel.Deny))
-					reply.ACLs = append(reply.ACLs, channelACL)
-				}
-			}
-		}
+	//	// Construct the protobuf ChanACL objects corresponding to the ACLs defined
+	//	// in our channel list.
+	//	reply.ACLs = []*mumbleproto.ACL_ChanACL{}
+	//	// TODO: just use proper storage, it will make the code smaller, eaiser to manage
+	//	// Logic that does a specific task? Make it a function, it will make testing actually possible
+	//	for _, channel := range channels {
+	//		for _, childChannel := range channel.ACL.ACLs {
+	//			if childChannel == channel || childChannel.ApplySubs {
+	//				channelACL := &mumbleproto.ACL_ChanACL{}
+	//				// TODO: lol no
+	//				channelACL.Inherited = proto.Bool(channel != channel)
+	//				channelACL.ApplyHere = proto.Bool(childChannel.ApplyHere)
+	//				channelACL.ApplySubs = proto.Bool(childChannel.ApplySubs)
+	//				if childChannel.UserID >= 0 {
+	//					channelACL.UserID = childChannel.UserID
+	//					users[childChannel.UserID] = true
+	//				} else {
+	//					channelACL.Group = proto.String(childChannel.Group)
+	//				}
+	//				channelACL.Grant = proto.Uint32(uint32(childChannel.Allow))
+	//				channelACL.Deny = proto.Uint32(uint32(childChannel.Deny))
+	//				reply.ACLs = append(reply.ACLs, channelACL)
+	//			}
+	//		}
+	//	}
 
-		parent := channel.parent
-		allGroupNames := channel.ACL.GroupNames()
+	//	parent := channel.parent
+	//	allGroupNames := channel.ACL.GroupNames()
 
-		// TODO: This file makes me want to quit programming, its makes me sad.
+	//	// TODO: This file makes me want to quit programming, its makes me sad.
 
-		// Construct the protobuf ChanGroups that we send back to the client.
-		// Also constructs a usermap that is a set user ids from the channel's groups.
-		reply.Groups = []*mumbleproto.ACL_ChanGroup{}
-		for _, groupName := range allGroupNames {
-			// TODO: FIX THIS!
-			// Initializing all of these varialbles EVERYTIME through this god damn loop!
-			var (
-				group          Group
-				parentGroup    Group
-				hasGroup       bool
-				hasParentGroup bool
-			)
+	//	// Construct the protobuf ChanGroups that we send back to the client.
+	//	// Also constructs a usermap that is a set user ids from the channel's groups.
+	//	reply.Groups = []*mumbleproto.ACL_ChanGroup{}
+	//	for _, groupName := range allGroupNames {
+	//		// TODO: FIX THIS!
+	//		// Initializing all of these varialbles EVERYTIME through this god damn loop!
+	//		var (
+	//			group          Group
+	//			parentGroup    Group
+	//			hasGroup       bool
+	//			hasParentGroup bool
+	//		)
 
-			group, hasGroup = channel.ACL.Groups[groupName]
-			if parent != nil {
-				parentGroup, hasParentGroup = parent.ACL.Groups[groupName]
-			}
+	//		group, hasGroup = channel.ACL.Groups[groupName]
+	//		if parent != nil {
+	//			parentGroup, hasParentGroup = parent.ACL.Groups[groupName]
+	//		}
 
-			protocolGroup := &mumbleproto.ACL_ChanGroup{}
-			protocolGroup.Name = proto.String(groupName)
+	//		protocolGroup := &mumbleproto.ACL_ChanGroup{}
+	//		protocolGroup.Name = proto.String(groupName)
 
-			protocolGroup.Inherit = proto.Bool(true)
-			if hasGroup {
-				protocolGroup.Inherit = proto.Bool(group.Inherit)
-			}
+	//		protocolGroup.Inherit = proto.Bool(true)
+	//		if hasGroup {
+	//			protocolGroup.Inherit = proto.Bool(group.Inherit)
+	//		}
 
-			protocolGroup.Inheritable = proto.Bool(true)
-			if hasGroup {
-				protocolGroup.Inheritable = proto.Bool(group.Inheritable)
-			}
+	//		protocolGroup.Inheritable = proto.Bool(true)
+	//		if hasGroup {
+	//			protocolGroup.Inheritable = proto.Bool(group.Inheritable)
+	//		}
 
-			protocolGroup.Inherited = proto.Bool(hasParentGroup && parentGroup.Inheritable)
+	//		protocolGroup.Inherited = proto.Bool(hasParentGroup && parentGroup.Inheritable)
 
-			// Add the set of user ids that this group affects to the user map.
-			// This is used later on in this function to send the client a QueryUsers
-			// message that maps user ids to usernames.
-			if hasGroup {
-				members := map[int]bool{}
-				for uid, _ := range group.Add {
-					users[uid] = true
-					members[uid] = true
-				}
-				for uid, _ := range group.Remove {
-					users[uid] = true
-					delete(members, uid)
-				}
-				for uid, _ := range members {
-					// TODO: This should already be a fucking uint32, if you are converting on every comparison you are doing something wrong, rethink your data types
-					protocolGroup.Add = append(protocolGroup.Add, uint32(uid))
-				}
-			}
-			if hasParentGroup {
-				for uid, _ := range parentGroup.MembersInContext(&parent.ACL) {
-					users[uid] = true
-					protocolGroup.InheritedMembers = append(protocolGroup.InheritedMembers, uint32(uid))
-				}
-			}
+	//		// Add the set of user ids that this group affects to the user map.
+	//		// This is used later on in this function to send the client a QueryUsers
+	//		// message that maps user ids to usernames.
+	//		if hasGroup {
+	//			members := map[int]bool{}
+	//			for uid, _ := range group.Add {
+	//				users[uid] = true
+	//				members[uid] = true
+	//			}
+	//			for uid, _ := range group.Remove {
+	//				users[uid] = true
+	//				delete(members, uid)
+	//			}
+	//			for uid, _ := range members {
+	//				// TODO: This should already be a fucking uint32, if you are converting on every comparison you are doing something wrong, rethink your data types
+	//				protocolGroup.Add = append(protocolGroup.Add, uint32(uid))
+	//			}
+	//		}
+	//		if hasParentGroup {
+	//			for uid, _ := range parentGroup.MembersInContext(&parent.ACL) {
+	//				users[uid] = true
+	//				protocolGroup.InheritedMembers = append(protocolGroup.InheritedMembers, uint32(uid))
+	//			}
+	//		}
 
-			reply.Groups = append(reply.Groups, protocolGroup)
-		}
+	//		reply.Groups = append(reply.Groups, protocolGroup)
+	//	}
 
-		if err := client.sendMessage(reply); err != nil {
-			client.Panic(err)
-			return
-		}
+	//	if err := client.sendMessage(reply); err != nil {
+	//		client.Panic(err)
+	//		return
+	//	}
 
-		// TODO: EVEN IF YOU WERE GOING TO DO THIS, WHY not do it in a fucking seperate function? this is like 400 lines, there was no way you could ever write tests for this.
-		// Map the user ids in the user map to usernames of users.
-		queryUsers := &mumbleproto.QueryUsers{}
-		for uid, _ := range users {
-			user, ok := server.Users[uid]
-			if !ok {
-				client.Printf("Invalid user id in ACL")
-				continue
-			}
-			queryUsers.IDs = append(queryUsers.IDs, uint32(uid))
-			queryUsers.Names = append(queryUsers.Names, user.Name)
-		}
-		if len(queryusers.IDs) > 0 {
-			client.sendMessage(queryUsers)
-		}
-		// Set new groups and ACLs
-	} else {
-		// Get old temporary members
-		oldTemporaryMembers := map[string]map[int]bool{}
-		for name, group := range channel.ACL.Groups {
-			oldtmp[name] = group.Temporary
-		}
+	//	// TODO: EVEN IF YOU WERE GOING TO DO THIS, WHY not do it in a fucking seperate function? this is like 400 lines, there was no way you could ever write tests for this.
+	//	// Map the user ids in the user map to usernames of users.
+	//	queryUsers := &mumbleproto.QueryUsers{}
+	//	for uid, _ := range users {
+	//		user, ok := server.Users[uid]
+	//		if !ok {
+	//			client.Printf("Invalid user id in ACL")
+	//			continue
+	//		}
+	//		queryUsers.IDs = append(queryUsers.IDs, uint32(uid))
+	//		queryUsers.Names = append(queryUsers.Names, user.Name)
+	//	}
+	//	if len(queryusers.IDs) > 0 {
+	//		client.sendMessage(queryUsers)
+	//	}
+	//	// Set new groups and ACLs
+	//} else {
+	//	// Get old temporary members
+	//	oldTemporaryMembers := map[string]map[int]bool{}
+	//	for name, group := range channel.ACL.Groups {
+	//		oldtmp[name] = group.Temporary
+	//	}
 
-		// Clear current ACLs and groups
-		channel.ACL.ACLs = []acl.ACL{}
-		channel.ACL.Groups = map[string]acl.Group{}
+	//	// Clear current ACLs and groups
+	//	channel.ACL.ACLs = []acl.ACL{}
+	//	channel.ACL.Groups = map[string]acl.Group{}
 
-		// TODO: This repeats WAY to much and is unreadable and full of potential issues
-		// IT REQUIRES SIMPLIFICATION, for fucks sake, 1200 lines already? 73% fuck!
+	//	// TODO: This repeats WAY to much and is unreadable and full of potential issues
+	//	// IT REQUIRES SIMPLIFICATION, for fucks sake, 1200 lines already? 73% fuck!
 
-		// Add the received groups to the channel.
-		channel.ACL.InheritACL = *parentACL.InheritACLs
-		for _, relatedGroup := range parentACL.Groups {
-			channelGroup := acl.EmptyGroupWithName(*relatedGroup.Name)
+	//	// Add the received groups to the channel.
+	//	channel.ACL.InheritACL = *parentACL.InheritACLs
+	//	for _, relatedGroup := range parentACL.Groups {
+	//		channelGroup := acl.EmptyGroupWithName(*relatedGroup.Name)
 
-			channelGroup.Inherit = *relatedGroup.Inherit
-			channelGroup.Inheritable = *relatedGroup.Inheritable
-			for _, uid := range relatedGroup.Add {
-				channelGroup.Add[int(uid)] = true
-			}
-			for _, uid := range relatedGroup.Remove {
-				channelGroup.Remove[int(uid)] = true
-			}
-			// TODO: Not ok! Use err, have the error hold the message to display, be consistent!
-			if temporaryMembers, ok := oldTemporaryMembers[*relatedGroup.Name]; ok {
-				channelGroup.Temporary = temporaryMembers
-			}
+	//		channelGroup.Inherit = *relatedGroup.Inherit
+	//		channelGroup.Inheritable = *relatedGroup.Inheritable
+	//		for _, uid := range relatedGroup.Add {
+	//			channelGroup.Add[int(uid)] = true
+	//		}
+	//		for _, uid := range relatedGroup.Remove {
+	//			channelGroup.Remove[int(uid)] = true
+	//		}
+	//		// TODO: Not ok! Use err, have the error hold the message to display, be consistent!
+	//		if temporaryMembers, ok := oldTemporaryMembers[*relatedGroup.Name]; ok {
+	//			channelGroup.Temporary = temporaryMembers
+	//		}
 
-			channel.ACL.Groups[channelGroup.Name] = channelGroup
-		}
-		// Add the received ACLs to the channel.
-		for _, inheritedACL := range parentACL.ACLs {
-			channelACL := acl.ACL{}
-			// TODO: Stop repeating shit
-			channelACL.ApplyHere = *inheritedACL.ApplyHere
-			channelACL.ApplySubs = *inheritedACL.ApplySubs
-			if pbacl.UserId != nil {
-				// TODO: IF this userID is the admin? Why not AdminID
-				// TODO: Stop conerting IDs so much!
-				channelACL.UserID = int(*inheritedACL.UserID)
-			} else {
-				channelACL.Group = *inheritedACL.Group
-			}
-			channelACL.Deny = acl.Permission(*inheritedACL.Deny & acl.AllPermissions)
-			channelACL.Allow = acl.Permission(*inheritedACL.Grant & acl.AllPermissions)
+	//		channel.ACL.Groups[channelGroup.Name] = channelGroup
+	//	}
+	//	// Add the received ACLs to the channel.
+	//	for _, inheritedACL := range parentACL.ACLs {
+	//		channelACL := acl.ACL{}
+	//		// TODO: Stop repeating shit
+	//		channelACL.ApplyHere = *inheritedACL.ApplyHere
+	//		channelACL.ApplySubs = *inheritedACL.ApplySubs
+	//		if pbacl.UserId != nil {
+	//			// TODO: IF this userID is the admin? Why not AdminID
+	//			// TODO: Stop conerting IDs so much!
+	//			channelACL.UserID = int(*inheritedACL.UserID)
+	//		} else {
+	//			channelACL.Group = *inheritedACL.Group
+	//		}
+	//		channelACL.Deny = acl.Permission(*inheritedACL.Deny & acl.AllPermissions)
+	//		channelACL.Allow = acl.Permission(*inheritedACL.Grant & acl.AllPermissions)
 
-			channel.ACL.ACLs = append(channel.ACL.ACLs, channelACL)
-		}
+	//		channel.ACL.ACLs = append(channel.ACL.ACLs, channelACL)
+	//	}
 
-		// Clear the Server's caches
-		server.ClearCaches()
+	//	// Clear the Server's caches
+	//	server.ClearCaches()
 
-		// Regular user?
-		if !acl.HasPermission(&channel.ACL, client, acl.WritePermission) && client.IsRegistered() || client.HasCertificate() {
-			channelACL := acl.ACL{}
-			// TODO: Oh come on. This should not be just statically coded like this, 500 lines in
-			channelACL.ApplyHere = true
-			channelACL.ApplySubs = false
-			if client.IsRegistered() {
-				chanacl.UserID = client.UserID()
-			} else if client.HasCertificate() {
-				channelACL.Group = "$" + client.CertificateHash()
-			}
-			channelACL.Deny = acl.Permission(acl.NonePermission)
-			channelACL.Allow = acl.Permission(acl.WritePermission | acl.TraversePermission)
+	//	// Regular user?
+	//	if !acl.HasPermission(&channel.ACL, client, acl.WritePermission) && client.IsRegistered() || client.HasCertificate() {
+	//		channelACL := acl.ACL{}
+	//		// TODO: Oh come on. This should not be just statically coded like this, 500 lines in
+	//		channelACL.ApplyHere = true
+	//		channelACL.ApplySubs = false
+	//		if client.IsRegistered() {
+	//			chanacl.UserID = client.UserID()
+	//		} else if client.HasCertificate() {
+	//			channelACL.Group = "$" + client.CertificateHash()
+	//		}
+	//		channelACL.Deny = acl.Permission(acl.NonePermission)
+	//		channelACL.Allow = acl.Permission(acl.WritePermission | acl.TraversePermission)
 
-			channel.ACL.ACLs = append(channel.ACL.ACLs, channelACL)
-			// TODO: Replicate this everywhere and shrink all functions, its just too much for anyone to really test, manage, debug, etc. Just wastes time
-			server.ClearCaches()
-		}
+	//		channel.ACL.ACLs = append(channel.ACL.ACLs, channelACL)
+	//		// TODO: Replicate this everywhere and shrink all functions, its just too much for anyone to really test, manage, debug, etc. Just wastes time
+	//		server.ClearCaches()
+	//	}
 
-		// Update freezer
-		server.UpdateFrozenChannelACLs(channel)
-	}
+	//	// Update freezer
+	//	server.UpdateFrozenChannelACLs(channel)
+	//}
 }
 
 // User query
@@ -1317,6 +1323,7 @@ func (server *Server) handleQueryUsers(client *Client, message *Message) {
 		return
 	}
 
+	// TODO: Don't do this, servers daemonize, so use a centralized logging system controlled by configuration
 	server.Printf("in handleQueryUsers")
 
 	reply := &mumbleproto.QueryUsers{}
@@ -1373,14 +1380,15 @@ func (server *Server) handleUserStatsMessage(client *Client, message *Message) {
 	// on the root channel.
 	rootChannel := server.RootChannel()
 	// TODO: Another if not needed. It adds up, its a message function!
-	extended = acl.HasPermission(&rootChannel.ACL, client, acl.RegisterPermission)
+	//extended = acl.HasPermission(&rootChannel.ACL, client, acl.RegisterPermission)
 
 	// If the client wasn't granted extended permissions, only allow it to query
 	// users in channels it can enter.
-	if !extended && !acl.HasPermission(&target.Channel.ACL, client, acl.EnterPermission) {
-		client.sendPermissionDenied(client, target.Channel, acl.EnterPermission)
-		return
-	}
+	// TODO: HasPermission update
+	//if !extended && !acl.HasPermission(&target.Channel.ACL, client, acl.EnterPermission) {
+	//	client.sendPermissionDenied(client, target.Channel, acl.EnterPermission)
+	//	return
+	//}
 
 	// TODO: Why? whats the advantage here, why are we 600 lines in and initializing new god damn varibales? There is no way you could reliably debug this and provide a secure app
 	details := extended
@@ -1555,19 +1563,20 @@ func (server *Server) handleRequestBlob(client *Client, message *Message) {
 					continue
 				}
 				if target.user.HasTexture() {
-					buffer, err := blobStore.Get(target.user.TextureBlob)
-					if err != nil {
-						server.Panicf("Blobstore error: %v", err)
-						return
-					}
-					userState.Reset()
-					userState.Session = proto.Uint32(uint32(target.Session()))
-					// TODO: What is a texture????? BETTER NAMES
-					userState.Texture = buffer
-					if err := client.sendMessage(userState); err != nil {
-						client.Panic(err)
-						return
-					}
+					// TODO: Replace this shit alter, just get the first major structure changes in
+					//buffer, err := blobStore.Get(target.user.TextureBlob)
+					//if err != nil {
+					//	server.Panicf("Blobstore error: %v", err)
+					//	return
+					//}
+					//userState.Reset()
+					//userState.Session = proto.Uint32(uint32(target.Session()))
+					//// TODO: What is a texture????? BETTER NAMES
+					//userState.Texture = buffer
+					//if err := client.sendMessage(userState); err != nil {
+					//	client.Panic(err)
+					//	return
+					//}
 				}
 			}
 		}
@@ -1584,19 +1593,20 @@ func (server *Server) handleRequestBlob(client *Client, message *Message) {
 					continue
 				}
 				if target.user.HasComment() {
-					buffer, err := BlobStoreGet(target.user.CommentBlob)
-					if err != nil {
-						// TODO: There is no reason to repeat these fucntions for each class, its just bad
-						server.Panicf("Blobstore error: %v", err)
-						return
-					}
-					userState.Reset()
-					userState.Session = proto.Uint32(uint32(target.Session()))
-					userState.Comment = proto.String(string(buffer))
-					if err := client.sendMessage(userState); err != nil {
-						client.Panic(err)
-						return
-					}
+					// TODO: Ughh just comment blob shit out now for the first major structure changes to work and tackle this after
+					//buffer, err := requestBlob.Get(target.user.CommentBlob)
+					//if err != nil {
+					//	// TODO: There is no reason to repeat these fucntions for each class, its just bad
+					//	server.Panicf("Blobstore error: %v", err)
+					//	return
+					//}
+					//userState.Reset()
+					//userState.Session = proto.Uint32(uint32(target.Session()))
+					//userState.Comment = proto.String(string(buffer))
+					//if err := client.sendMessage(userState); err != nil {
+					//	client.Panic(err)
+					//	return
+					//}
 				}
 			}
 		}
@@ -1610,19 +1620,19 @@ func (server *Server) handleRequestBlob(client *Client, message *Message) {
 		for _, cid := range requestBlob.ChannelDescription {
 			if channel, ok := server.Channels[int(cid)]; ok {
 				if channel.HasDescription() {
-					chanstate.Reset()
-					buffer, err := BlobStoreGet(channel.DescriptionBlob)
-					if err != nil {
-						server.Panicf("Blobstore error: %v", err)
-						return
-					}
-					// TODO: you should be asking yourself, if you are doing a conversion everytime you use a variable, is there something majorly wrong? the answer is yes
-					channelState.ChannelID = proto.Uint32(uint32(channel.ID))
-					channelState.Description = proto.String(string(buffer))
-					if err := client.sendMessage(channelState); err != nil {
-						client.Panic(err)
-						return
-					}
+					channelState.Reset()
+					//buffer, err := requestBlob.Get(channel.DescriptionBlob)
+					//if err != nil {
+					//	server.Panicf("Blobstore error: %v", err)
+					//	return
+					//}
+					//// TODO: you should be asking yourself, if you are doing a conversion everytime you use a variable, is there something majorly wrong? the answer is yes
+					//channelState.ChannelID = proto.Uint32(channel.ID)
+					//channelState.Description = proto.String(string(buffer))
+					//if err := client.sendMessage(channelState); err != nil {
+					//	client.Panic(err)
+					//	return
+					//}
 				}
 			}
 		}
@@ -1641,11 +1651,12 @@ func (server *Server) handleUserList(client *Client, message *Message) {
 
 	// Only users who are allowed to register other users can access the user list.
 	rootChannel := server.RootChannel()
-	if !acl.HasPermission(&rootChannel.ACL, client, acl.RegisterPermission) {
-		client.sendPermissionDenied(client, rootChannel, acl.RegisterPermission)
-		// TODO: Second time this came up atlest and if you used an error it would be consistent
-		return
-	}
+	// TODO: HasPermission needs updating
+	//if !&rootChannel.ACL.HasPermission(client, RegisterPermission) {
+	//	client.sendPermissionDenied(client, rootChannel, RegisterPermission)
+	//	// TODO: Second time this came up atlest and if you used an error it would be consistent
+	//	return
+	//}
 
 	// Query user list
 	// TODO: STOP COUNTING OVER what youw ant to check!
@@ -1683,19 +1694,19 @@ func (server *Server) handleUserList(client *Client, message *Message) {
 					if listUser.Name == nil {
 						// De-register
 						server.RemoveRegistration(uid)
-						err := tx.Put(&freezer.UserRemove{ID: listUser.UserID})
+						//err := tx.Put(&freezer.UserRemove{ID: listUser.UserID})
 						// TODO: If you made this a function you could reduce maybe 100 lines per file
-						if err != nil {
-							server.Fatal(err)
-						}
+						//if err != nil {
+						//	server.Fatal(err)
+						//}
 					} else {
 						// Rename user
 						// todo(mkrautz): Validate name.
 						user.Name = *listUser.Name
-						err := tx.Put(&freezer.User{ID: listUser.UserID, Name: listUser.Name})
-						if err != nil {
-							server.Fatal(err)
-						}
+						//err := tx.Put(&freezer.User{ID: listUser.UserID, Name: listUser.Name})
+						//if err != nil {
+						//	server.Fatal(err)
+						//}
 					}
 				}
 			}

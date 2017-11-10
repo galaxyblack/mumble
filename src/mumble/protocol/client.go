@@ -617,46 +617,46 @@ func (client *Client) sendChannelList() {
 }
 
 func (client *Client) sendChannelTree(channel *Channel) {
-	chanstate := &mumbleproto.ChannelState{
-		ChannelID: proto.Uint32(uint32(channel.ID)),
+	channelState := &mumbleproto.ChannelState{
+		ChannelID: proto.Uint32(channel.ID),
 		Name:      proto.String(channel.Name),
 	}
 	if channel.parent != nil {
-		chanstate.Parent = proto.Uint32(uint32(channel.parent.ID))
+		channelState.Parent = proto.Uint32(channel.parent.ID)
 	}
 
 	if channel.HasDescription() {
 		if client.Version >= 0x10202 {
-			chanstate.DescriptionHash = channel.DescriptionBlobHashBytes()
+			channelState.DescriptionHash = channel.DescriptionBlobHashBytes()
 		} else {
 			// TODO: Can we please just use a key/value store? Orrr the fucking SQL database we implemented? For fucks sake
-			buf, err := BlobStoreGet(channel.DescriptionBlob)
-			if err != nil {
-				panic("Blobstore error.")
-			}
-			chanstate.Description = proto.String(string(buf))
+			//buffer, err := blobStore.Get(channel.DescriptionBlob)
+			//if err != nil {
+			//	panic("Blobstore error.")
+			//}
+			//channelState.Description = proto.String(string(buffer))
 		}
 	}
 
 	if channel.IsTemporary() {
-		chanstate.Temporary = proto.Bool(true)
+		channelState.Temporary = proto.Bool(true)
 	}
 
-	chanstate.Position = proto.Int32(int32(channel.Position))
+	channelState.Position = proto.Int32(int32(channel.Position))
 
 	links := []uint32{}
 	for cid, _ := range channel.Links {
 		links = append(links, uint32(cid))
 	}
-	chanstate.Links = links
+	channelState.Links = links
 
-	err := client.sendMessage(chanstate)
+	err := client.sendMessage(channelState)
 	if err != nil {
 		client.Panicf("%v", err)
 	}
 
-	for _, subchannel := range channel.children {
-		client.sendChannelTree(subchannel)
+	for _, childChannel := range channel.children {
+		client.sendChannelTree(childChannel)
 	}
 }
 

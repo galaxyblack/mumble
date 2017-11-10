@@ -43,33 +43,36 @@ func MurmurImport(filename string) (err error) {
 		panic(err.Error())
 	}
 
-	var serverids []int64
+	var serverIDs []int64
 	var sid int64
 	for rows.Next() {
 		err = rows.Scan(&sid)
 		if err != nil {
 			return err
 		}
-		serverids = append(serverids, sid)
+		serverIDs = append(serverIDs, sid)
 	}
 
-	log.Printf("Found servers: %v (%v servers)", serverids, len(serverids))
+	log.Printf("Found servers: %v (%v servers)", serverIDs, len(serverIDs))
 
-	for _, sid := range serverids {
+	for _, sid := range serverIDs {
 		m, err := NewServerFromSQLite(sid, db)
 		if err != nil {
 			return err
 		}
 
-		err = os.Mkdir(filepath.Join(Args.DataDir, strconv.FormatInt(sid, 10)), 0750)
+		// TODO: Confine like logic, Args should ONLY be in the command files, rest should rely on configuration created or defined by command execution
+		// TODO: Grab a server and use the servers configuration file to know where to pullf rom
+		err = os.Mkdir(filepath.Join(strconv.FormatInt(sid, 10)), 0750)
 		if err != nil {
 			return err
 		}
 
-		err = m.FreezeToFile()
-		if err != nil {
-			return err
-		}
+		// TODO: Freeze to file is better said as write to file, also use a lib
+		//err = m.FreezeToFile()
+		//if err != nil {
+		//	return err
+		//}
 
 		log.Printf("Successfully imported server %v", sid)
 	}
@@ -78,43 +81,44 @@ func MurmurImport(filename string) (err error) {
 }
 
 // Create a new Server from a Murmur SQLite database
-func NewServerFromSQLite(id int64, db *sql.DB) (s *Server, err error) {
-	s, err = NewServer(id)
+func NewServerFromSQLite(id int64, db *sql.DB) (server *Server, err error) {
+	server, err = NewServer(id)
 	if err != nil {
 		return nil, err
 	}
 
-	err = populateChannelInfoFromDatabase(s, s.RootChannel(), db)
+	// TODO: If you pass server, there should ZERO reason to pass a specific attribute of the server afterwards
+	err = populateChannelInfoFromDatabase(server, server.RootChannel(), db)
 	if err != nil {
 		return nil, err
 	}
 
-	err = populateChannelACLFromDatabase(s, s.RootChannel(), db)
+	err = populateChannelACLFromDatabase(server, server.RootChannel(), db)
 	if err != nil {
 		return nil, err
 	}
 
-	err = populateChannelGroupsFromDatabase(s, s.RootChannel(), db)
+	err = populateChannelGroupsFromDatabase(server, server.RootChannel(), db)
 	if err != nil {
 		return nil, err
 	}
 
-	err = populateChannelsFromDatabase(s, db, 0)
+	err = populateChannelsFromDatabase(server, db, 0)
 	if err != nil {
 		return nil, err
 	}
 
-	err = populateChannelLinkInfo(s, db)
+	err = populateChannelLinkInfo(server, db)
 	if err != nil {
 		return nil, err
 	}
 
-	err = populateUsers(s, db)
+	err = populateUsers(server, db)
 	if err != nil {
 		return nil, err
 	}
 
-	err = populateBans(s, db)
+	err = populateBans(server, db)
 	if err != nil {
 		return nil, err
 	}
@@ -123,14 +127,15 @@ func NewServerFromSQLite(id int64, db *sql.DB) (s *Server, err error) {
 }
 
 // Add channel metadata (channel_info table from SQLite) by reading the SQLite database.
-func populateChannelInfoFromDatabase(server *Server, c *Channel, db *sql.DB) error {
-	stmt, err := db.Prepare("SELECT value FROM channel_info WHERE server_id=? AND channel_id=? AND key=?")
+func populateChannelInfoFromDatabase(server *Server, channel *Channel, db *sql.DB) error {
+	// TODO: What is the stmt mean? thats confusing variable naming
+	sqlStatement, err := db.Prepare("SELECT value FROM channel_info WHERE server_id=? AND channel_id=? AND key=?")
 	if err != nil {
 		return err
 	}
 
 	// Fetch description
-	rows, err := stmt.Query(server.Id, c.Id, ChannelInfoDescription)
+	rows, err := sqlStatement.Query(server.ID, channel.ID, ChannelInfoDescription)
 	if err != nil {
 		return err
 	}
@@ -142,136 +147,144 @@ func populateChannelInfoFromDatabase(server *Server, c *Channel, db *sql.DB) err
 		}
 
 		if len(description) > 0 {
-			key, err := blobStore.Put([]byte(description))
-			if err != nil {
-				return err
-			}
-			c.DescriptionBlob = key
+			// TODO: Fix this after structural changes, just use a fucking embedded db
+			//key, err := blobStore.Put([]byte(description))
+			//if err != nil {
+			//	return err
+			//}
+			//channel.DescriptionBlob = key
 		}
 	}
 
 	// Fetch position
-	rows, err = stmt.Query(server.Id, c.Id, ChannelInfoPosition)
+	rows, err = sqlStatement.Query(server.ID, channel.ID, ChannelInfoPosition)
 	if err != nil {
 		return err
 	}
 	for rows.Next() {
-		var pos int
-		if err := rows.Scan(&pos); err != nil {
+		var position int
+		if err := rows.Scan(&position); err != nil {
 			return err
 		}
 
-		c.Position = pos
+		// TODO: Why not just assing it directly?
+		channel.Position = position
 	}
 
 	return nil
 }
 
 // Populate channel with its ACLs by reading the SQLite databse.
-func populateChannelACLFromDatabase(server *Server, c *Channel, db *sql.DB) error {
-	stmt, err := db.Prepare("SELECT user_id, group_name, apply_here, apply_sub, grantpriv, revokepriv FROM acl WHERE server_id=? AND channel_id=? ORDER BY priority")
+func populateChannelACLFromDatabase(server *Server, channel *Channel, db *sql.DB) error {
+	sqlStatement, err := db.Prepare("SELECT user_id, group_name, apply_here, apply_sub, grantpriv, revokepriv FROM acl WHERE server_id=? AND channel_id=? ORDER BY priority")
 	if err != nil {
 		return err
 	}
 
-	rows, err := stmt.Query(server.Id, c.Id)
+	rows, err := sqlStatement.Query(server.ID, channel.ID)
 	if err != nil {
 		return err
 	}
 
 	for rows.Next() {
+		// TODO: Use structs, not local variables that are inited half way through a massive func, becomes undebuggable mess quickly
 		var (
-			UserId    string
+			UserID    string
 			Group     string
 			ApplyHere bool
 			ApplySub  bool
 			Allow     int64
 			Deny      int64
 		)
-		if err := rows.Scan(&UserId, &Group, &ApplyHere, &ApplySub, &Allow, &Deny); err != nil {
+		if err := rows.Scan(&UserID, &Group, &ApplyHere, &ApplySub, &Allow, &Deny); err != nil {
 			return err
 		}
 
-		aclEntry := acl.ACL{}
-		aclEntry.ApplyHere = ApplyHere
-		aclEntry.ApplySubs = ApplySub
-		if len(UserId) > 0 {
-			aclEntry.UserId, err = strconv.Atoi(UserId)
-			if err != nil {
-				return err
-			}
-		} else if len(Group) > 0 {
-			aclEntry.Group = Group
-		} else {
-			return errors.New("Invalid ACL: Neither Group or UserId specified")
-		}
+		// TODO: Fix this ACL shit later once we have an embedded db and the structure is fixed
+		//ACLEntry := ACL{}
+		//ACLEntry.ApplyHere = ApplyHere
+		//ACLEntry.ApplySubs = ApplySub
+		//// TODO: validations get their own functions for code reuse, and counting entire UserID is not necessary to check if empty
+		//if len(UserID) > 0 {
+		//	ACLEntry.UserID, err = strconv.Atoi(UserID)
+		//	if err != nil {
+		//		return err
+		//	}
+		//} else if len(Group) > 0 {
+		//	ACLEntry.Group = Group
+		//} else {
+		//	return errors.New("Invalid ACL: Neither Group or UserID specified")
+		//}
 
-		aclEntry.Deny = acl.Permission(Deny)
-		aclEntry.Allow = acl.Permission(Allow)
-		c.ACL.ACLs = append(c.ACL.ACLs, aclEntry)
+		//ACLEntry.Deny = Permission(Deny)
+		//ACLEntry.Allow = Permission(Allow)
+		//// TODO: Really hate this ACL.ACLs, should be better
+		//channel.ACL.ACLs = append(channel.ACL.ACLs, ACLEntry)
 	}
 
 	return nil
 }
 
 // Populate channel with groups by reading the SQLite database.
-func populateChannelGroupsFromDatabase(server *Server, c *Channel, db *sql.DB) error {
-	stmt, err := db.Prepare("SELECT group_id, name, inherit, inheritable FROM groups WHERE server_id=? AND channel_id=?")
+func populateChannelGroupsFromDatabase(server *Server, channel *Channel, db *sql.DB) error {
+	sqlStatement, err := db.Prepare("SELECT group_id, name, inherit, inheritable FROM groups WHERE server_id=? AND channel_id=?")
 	if err != nil {
 		return err
 	}
 
-	rows, err := stmt.Query(server.Id, c.Id)
+	rows, err := sqlStatement.Query(server.ID, channel.ID)
 	if err != nil {
 		return err
 	}
 
-	groups := make(map[int64]acl.Group)
+	groups := make(map[uint32]Group)
 
 	for rows.Next() {
 		var (
-			GroupId     int64
+			GroupID     uint32
 			Name        string
 			Inherit     bool
 			Inheritable bool
 		)
 
-		if err := rows.Scan(&GroupId, &Name, &Inherit, &Inheritable); err != nil {
+		if err := rows.Scan(&GroupID, &Name, &Inherit, &Inheritable); err != nil {
 			return err
 		}
 
-		g := acl.EmptyGroupWithName(Name)
-		g.Inherit = Inherit
-		g.Inheritable = Inheritable
-		c.ACL.Groups[g.Name] = g
-		groups[GroupId] = g
+		group := NewGroup(Name)
+		group.Inherit = Inherit
+		group.Inheritable = Inheritable
+		//channel.ACL.Groups[group.Name] = group
+		groups[GroupID] = group
 	}
 
-	stmt, err = db.Prepare("SELECT user_id, addit FROM group_members WHERE server_id=? AND group_id=?")
+	// TODO: If there are patterns, modularize and fragment with functions!
+	sqlStatement, err = db.Prepare("SELECT user_id, addit FROM group_members WHERE server_id=? AND group_id=?")
 	if err != nil {
 		return err
 	}
 
-	for gid, grp := range groups {
-		rows, err = stmt.Query(server.Id, gid)
+	for gid, group := range groups {
+		rows, err = sqlStatement.Query(server.ID, gid)
 		if err != nil {
 			return err
 		}
 
 		for rows.Next() {
+			// TODO: Use a struct!
 			var (
-				UserId int64
+				UserID uint32
 				Add    bool
 			)
 
-			if err := rows.Scan(&UserId, &Add); err != nil {
+			if err := rows.Scan(&UserID, &Add); err != nil {
 				return err
 			}
 
 			if Add {
-				grp.Add[int(UserId)] = true
+				group.Add[UserID] = true
 			} else {
-				grp.Remove[int(UserId)] = true
+				group.Remove[UserID] = true
 			}
 		}
 	}
@@ -280,58 +293,59 @@ func populateChannelGroupsFromDatabase(server *Server, c *Channel, db *sql.DB) e
 }
 
 // Populate the Server with Channels from the database.
-func populateChannelsFromDatabase(server *Server, db *sql.DB, parentId int) error {
-	parent, exists := server.Channels[parentId]
+func populateChannelsFromDatabase(server *Server, db *sql.DB, parentID uint32) error {
+	parentChannel, exists := server.Channels[int(parentID)]
 	if !exists {
 		return errors.New("Non-existant parent")
 	}
 
-	stmt, err := db.Prepare("SELECT channel_id, name, inheritacl FROM channels WHERE server_id=? AND parent_id=?")
+	sqlStatement, err := db.Prepare("SELECT channel_id, name, inheritacl FROM channels WHERE server_id=? AND parent_id=?")
 	if err != nil {
 		return err
 	}
 
-	rows, err := stmt.Query(server.Id, parentId)
+	rows, err := sqlStatement.Query(server.ID, parentID)
 	if err != nil {
 		return err
 	}
 
 	for rows.Next() {
+		// TODO: Use a struct plz
 		var (
-			name    string
-			chanid  int
-			inherit bool
+			name      string
+			channelID uint32
+			inherit   bool
 		)
-		err = rows.Scan(&chanid, &name, &inherit)
+		err = rows.Scan(&channelID, &name, &inherit)
 		if err != nil {
 			return err
 		}
 
-		c := NewChannel(chanid, name)
-		server.Channels[c.Id] = c
-		c.ACL.InheritACL = inherit
-		parent.AddChild(c)
+		channel := NewChannel(channelID, name)
+		server.Channels[channel.ID] = channel
+		channel.ACL.InheritACL = inherit
+		parentChannel.AddChild(channel)
 	}
 
 	// Add channel_info
-	for _, c := range parent.children {
-		err = populateChannelInfoFromDatabase(server, c, db)
+	for _, childChannel := range parent.children {
+		err = populateChannelInfoFromDatabase(server, childChannel, db)
 		if err != nil {
 			return err
 		}
 	}
 
 	// Add ACLs
-	for _, c := range parent.children {
-		err = populateChannelACLFromDatabase(server, c, db)
+	for _, childChannel := range parent.children {
+		err = populateChannelACLFromDatabase(server, childChannel, db)
 		if err != nil {
 			return err
 		}
 	}
 
 	// Add groups
-	for _, c := range parent.children {
-		err = populateChannelGroupsFromDatabase(server, c, db)
+	for _, childChannel := range parent.children {
+		err = populateChannelGroupsFromDatabase(server, childChannel, db)
 		if err != nil {
 			return err
 		}
@@ -350,31 +364,32 @@ func populateChannelsFromDatabase(server *Server, db *sql.DB, parentId int) erro
 
 // Link a Server's channels together
 func populateChannelLinkInfo(server *Server, db *sql.DB) (err error) {
-	stmt, err := db.Prepare("SELECT channel_id, link_id FROM channel_links WHERE server_id=?")
+	sqlStatement, err := db.Prepare("SELECT channel_id, link_id FROM channel_links WHERE server_id=?")
 	if err != nil {
 		return err
 	}
 
-	rows, err := stmt.Query(server.Id)
+	rows, err := sqlStatement.Query(server.ID)
 	if err != nil {
 		return err
 	}
 
 	for rows.Next() {
+		// TODO: Use structs stop wasting memory with inline local variables that are not even being actively unallacated
 		var (
-			ChannelId int
-			LinkId    int
+			ChannelID int
+			LinkID    int
 		)
-		if err := rows.Scan(&ChannelId, &LinkId); err != nil {
+		if err := rows.Scan(&ChannelID, &LinkID); err != nil {
 			return err
 		}
 
-		channel, exists := server.Channels[ChannelId]
+		channel, exists := server.Channels[ChannelID]
 		if !exists {
 			return errors.New("Attempt to perform link operation on non-existant channel.")
 		}
 
-		other, exists := server.Channels[LinkId]
+		other, exists := server.Channels[LinkID]
 		if !exists {
 			return errors.New("Attempt to perform link operation on non-existant channel.")
 		}
@@ -387,33 +402,35 @@ func populateChannelLinkInfo(server *Server, db *sql.DB) (err error) {
 
 func populateUsers(server *Server, db *sql.DB) (err error) {
 	// Populate the server with regular user data
-	stmt, err := db.Prepare("SELECT user_id, name, pw, lastchannel, texture, strftime('%s', last_active) FROM users WHERE server_id=?")
+	sqlStatement, err := db.Prepare("SELECT user_id, name, pw, lastchannel, texture, strftime('%s', last_active) FROM users WHERE server_id=?")
 	if err != nil {
 		return
 	}
 
-	rows, err := stmt.Query(server.Id)
+	rows, err := sqlStatement.Query(server.ID)
 	if err != nil {
 		return
 	}
 
 	for rows.Next() {
 		var (
-			UserId       int64
-			UserName     string
+			UserID   int64
+			UserName string
+			// TODO: 2017 we dont use easily broken hashes like SHA1 bitte bitte bitte
 			SHA1Password string
 			LastChannel  int
 			Texture      []byte
 			LastActive   int64
 		)
 
-		err = rows.Scan(&UserId, &UserName, &SHA1Password, &LastChannel, &Texture, &LastActive)
+		err = rows.Scan(&UserID, &UserName, &SHA1Password, &LastChannel, &Texture, &LastActive)
 		if err != nil {
 			continue
 		}
 
-		if UserId == 0 {
-			server.cfg.Set("SuperUserPassword", "sha1$$"+SHA1Password)
+		if UserID == 0 {
+			// TODO: We can do better
+			server.config.Set("SuperUserPassword", "sha1$$"+SHA1Password)
 		}
 
 		user, err := NewUser(uint32(UserId), UserName)

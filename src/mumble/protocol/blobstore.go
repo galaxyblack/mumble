@@ -81,7 +81,7 @@ func extractKeyComponents(key string) (directory string, fileName string, err er
 // the blob identified by key. If no such blob is found,
 // BlobStoreGet returns ErrNoSuchKey.
 // TODO: Can we just use a key/value store bitte?
-func BlobStoreGet(key string) ([]byte, error) {
+func (blobStore BlobStore) Get(key string) ([]byte, error) {
 	directory, fileName, err := extractKeyComponents(key)
 	if err != nil {
 		return nil, err
