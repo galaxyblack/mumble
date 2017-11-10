@@ -3,6 +3,7 @@ package protocol
 import (
 	"crypto/aes"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	//"net"
 	//"time"
@@ -41,14 +42,16 @@ func (server *Server) handleCryptSetup(client *Client, message *Message) {
 	// is requesting that we re-sync our nonces.
 	// TODO: checking empty by counting more than 0/1? Waste of cpu
 	if len(cryptSetup.ClientNonce) == 0 {
-		client.Printf("Requested crypt-nonce resync")
+		// TODO: Why is message calling client methods? This is really bad isolation of logic
+		//client.Printf("Requested crypt-nonce resync")
 		cryptSetup.ClientNonce = make([]byte, aes.BlockSize)
 		if copy(cryptSetup.ClientNonce, client.crypt.EncryptIV[0:]) != aes.BlockSize {
 			return
 		}
 		client.sendMessage(cryptSetup)
 	} else {
-		client.Printf("Received client nonce")
+		// TODO: Why is message calling client methods? This is really bad isolation of logic
+		//client.Printf("Received client nonce")
 		// TODO: checking empty by counting more than 0/1? Waste of cpu
 		if len(cryptSetup.ClientNonce) != aes.BlockSize {
 			return
@@ -58,7 +61,8 @@ func (server *Server) handleCryptSetup(client *Client, message *Message) {
 		if copy(client.crypt.DecryptIV[0:], cryptSetup.ClientNonce) != aes.BlockSize {
 			return
 		}
-		client.Printf("Crypt re-sync successful")
+		// TODO: Why is message calling client methods? This is really bad isolation of logic
+		//client.Printf("Crypt re-sync successful")
 	}
 }
 
@@ -125,13 +129,13 @@ func (server *Server) handleChannelRemoveMessage(client *Client, message *Messag
 		return
 	}
 
-	channel, exists := server.Channels[int(*channelRemove.ChannelID)]
+	channel, exists := server.Channels[*channelRemove.ChannelID]
 	if !exists {
 		return
 	}
 
-	//if *(&channel.ACL.HasPermission(client.Context, client, acl.WritePermission)) {
-	//	client.sendPermissionDenied(client, channel, acl.WritePermission)
+	//if *(&channel.ACL.HasPermission(client.Context, client, WritePermission)) {
+	//	client.sendPermissionDenied(client, channel, WritePermission)
 	//	return
 	//}
 
@@ -160,19 +164,19 @@ func (server *Server) handleChannelStateMessage(client *Client, message *Message
 
 	// Lookup channel for channel ID
 	if channelState.ChannelID != nil {
-		channel, ok = server.Channels[int(*channelState.ChannelID)]
-		if !ok {
-			client.Panic("Invalid channel specified in ChannelState message")
+		channel, success := server.Channels[*channelState.ChannelID]
+		if success {
+			client.Panic(errors.New("Invalid channel specified in ChannelState message"))
 			return
 		}
 	}
 
 	// Lookup parent
 	if channelState.Parent != nil {
-		parent, ok = server.Channels[int(*channelState.Parent)]
+		parent, success := server.Channels[*channelState.Parent]
 		// TODO: Ok should be err, and provide the fucking string, god damn
-		if !ok {
-			client.Panic("Invalid parent channel specified in ChannelState message")
+		if success {
+			client.Panic(errors.New("Invalid parent channel specified in ChannelState message"))
 			return
 		}
 	}
@@ -367,7 +371,7 @@ func (server *Server) handleChannelStateMessage(client *Client, message *Message
 			iter := parent
 			for iter != nil {
 				if iter == channel {
-					client.Panic("Illegal channel reparent")
+					client.Panic(errors.New("Illegal channel reparent"))
 					return
 				}
 				iter = iter.parent
@@ -452,7 +456,7 @@ func (server *Server) handleChannelStateMessage(client *Client, message *Message
 				// TODO: uhh, no this is fucked
 				//key, err := blobStore.Put([]byte(description))
 				//if err != nil {
-				//	server.Panicf("Blobstore error: %v", err)
+				//	server.Panic(err)
 				//}
 				//channel.DescriptionBlob = key
 			}
@@ -513,7 +517,7 @@ func (server *Server) handleUserRemoveMessage(removedClient *Client, message *Me
 	removedClient, ok := server.clients[removedClientSession]
 	// TODO: Don't use ok, then use the error to pvodie the message!
 	if !ok {
-		removedClient.Panic("Invalid session in UserRemove message")
+		removedClient.Panic(errors.New("Invalid session in UserRemove message"))
 		return
 	}
 	// Just checked if its banned from the pointer, not a local variable, thats just overcomplex
@@ -553,14 +557,16 @@ func (server *Server) handleUserRemoveMessage(removedClient *Client, message *Me
 	// Actor is just a uint32, whats the point here??
 	//removedClient.Actor = proto.Uint32(removedClient.Session())
 	if err = server.broadcastProtoMessage(removedClient); err != nil {
-		server.Panicf("Unable to broadcast UserRemove message")
+		server.Panic(errors.New("Unable to broadcast UserRemove message"))
 		return
 	}
 
 	if isBanned {
-		removedClient.Printf("Kick-banned %v (%v)", removedClient.ShownName(), removedClient.Session())
+		// TODO: Why is message calling client methods? This is really bad isolation of logic
+		//removedClient.Printf("Kick-banned %v (%v)", removedClient.ShownName(), removedClient.Session())
 	} else {
-		removedClient.Printf("Kicked %v (%v)", removedClient.ShownName(), removedClient.Session())
+		// TODO: Why is message calling client methods? This is really bad isolation of logic
+		//removedClient.Printf("Kicked %v (%v)", removedClient.ShownName(), removedClient.Session())
 	}
 
 	removedClient.ForceDisconnect()
@@ -577,14 +583,14 @@ func (server *Server) handleUserStateMessage(client *Client, message *Message) {
 
 	actor, ok := server.clients[client.Session()]
 	if !ok {
-		server.Panic("Client not found in server's client map.")
+		server.Panic(errors.New("Client not found in server's client map."))
 		return
 	}
 	target := actor
 	if userState.Session != nil {
 		target, ok = server.clients[*userState.Session]
 		if !ok {
-			client.Panic("Invalid session in UserState message")
+			client.Panic(errors.New("Invalid session in UserState message"))
 			return
 		}
 	}
@@ -595,7 +601,8 @@ func (server *Server) handleUserStateMessage(client *Client, message *Message) {
 	// Does it have a channel ID?
 	if userState.ChannelID != nil {
 		// Destination channel
-		destinationChannel, ok := server.Channels[int(*userState.ChannelID)]
+		destinationChannel, ok := server.Channels[*userState.ChannelID]
+		// TODO: Don't use ok instead of error, errors are created because they provide application state, without that no debugging is possible
 		if !ok {
 			return
 		}
@@ -621,7 +628,7 @@ func (server *Server) handleUserStateMessage(client *Client, message *Message) {
 		maxUsersPerChannel := server.config.MaxUsersPerChannel
 		// TODO just check if index exists at max value, no need to count every client
 		// TODO: Validation != 0
-		if maxUsersPerChannel != 0 && len(destinationChannel.clients) >= maxUsersPerChannel {
+		if maxUsersPerChannel != 0 && destinationChannel.clients[maxUsersPerChannel] != nil {
 			client.sendPermissionDeniedFallback(mumbleproto.PermissionDenied_ChannelFull, 0x010201, "Channel is full")
 			return
 		}
@@ -685,7 +692,9 @@ func (server *Server) handleUserStateMessage(client *Client, message *Message) {
 	if userState.Texture != nil {
 		// TODO: Since its already in the config, no need for local variable
 		maxImageLength := server.config.MaxImageMessageLength
-		if maxImageLength > 0 && len(userState.Texture) > maxImageLength {
+		// TODO:VALIDATE: not empty length ?? but what is being checked if the configuration value is over 0, wierd, this is why we break this out and validate its functionality with tests
+		// TODO:VALIDATE: not over max length
+		if maxImageLength > 0 && &(userState.Texture[maxImageLength+1]) != nil {
 			client.sendPermissionDeniedType(mumbleproto.PermissionDenied_TextTooLong)
 			return
 		}
@@ -725,7 +734,7 @@ func (server *Server) handleUserStateMessage(client *Client, message *Message) {
 	if actor != target && (userState.SelfDeaf != nil || userState.SelfMute != nil ||
 		userState.Texture != nil || userState.PluginContext != nil || userState.PluginIdentity != nil ||
 		userState.Recording != nil) {
-		client.Panic("Invalid UserState")
+		client.Panic(errors.New("Invalid UserState"))
 		return
 	}
 
@@ -736,7 +745,7 @@ func (server *Server) handleUserStateMessage(client *Client, message *Message) {
 		// TODO: lets just use a file writing lib
 		//key, err := blobStore.Put(userState.Texture)
 		//if err != nil {
-		//	server.Panicf("Blobstore error: %v", err)
+		//	server.Panic(err)
 		//	return
 		//}
 
@@ -779,7 +788,7 @@ func (server *Server) handleUserStateMessage(client *Client, message *Message) {
 		// TODO: well replace blboStore anyways
 		//key, err := blobStore.Put([]byte(*userState.Comment))
 		//if err != nil {
-		//	server.Panicf("Blobstore error: %v", err)
+		//	server.Panic(err)
 		//}
 
 		//if target.user.CommentBlob != key {
@@ -837,7 +846,8 @@ func (server *Server) handleUserStateMessage(client *Client, message *Message) {
 	if userState.UserID != nil {
 		uid, err := server.RegisterClient(target)
 		if err != nil {
-			client.Printf("Unable to register: %v", err)
+			// TODO: Why is message calling client methods? This is really bad isolation of logic
+			//client.Printf("Unable to register: %v", err)
 			userState.UserID = nil
 		} else {
 			userState.UserID = proto.Uint32(uid)
@@ -848,7 +858,7 @@ func (server *Server) handleUserStateMessage(client *Client, message *Message) {
 	}
 
 	if userState.ChannelID != nil {
-		channel, ok := server.Channels[int(*userState.ChannelID)]
+		channel, ok := server.Channels[*userState.ChannelID]
 		// TODO: No not ok, use error, then you can actually inform dev/user/admin whats the fuck is going on
 		if ok {
 			server.userEnterChannel(target, channel, userState)
@@ -874,7 +884,7 @@ func (server *Server) handleUserStateMessage(client *Client, message *Message) {
 				return client.Version < 0x10202
 			})
 			if err != nil {
-				server.Panic("Unable to broadcast UserState")
+				server.Panic(errors.New("Unable to broadcast UserState"))
 			}
 			// Re-add it to the message, so that 1.2.2+ clients *do* get the new-style texture.
 			userState.Texture = texture
@@ -884,7 +894,7 @@ func (server *Server) handleUserStateMessage(client *Client, message *Message) {
 				return client.Version < 0x10202
 			})
 			if err != nil {
-				server.Panic("Unable to broadcast UserState")
+				server.Panic(errors.New("Unable to broadcast UserState"))
 			}
 		}
 
@@ -916,7 +926,7 @@ func (server *Server) handleUserStateMessage(client *Client, message *Message) {
 			return client.Version >= 0x10203
 		})
 		if err != nil {
-			server.Panic("Unable to broadcast UserState")
+			server.Panic(errors.New("Unable to broadcast UserState"))
 		}
 	}
 
@@ -955,11 +965,13 @@ func (server *Server) handleBanListMessage(client *Client, message *Message) {
 			entry.Hash = proto.String(ban.CertificateHash)
 			entry.Reason = proto.String(ban.Reason)
 			entry.Start = proto.String(ban.ISOStartDate())
-			entry.Duration = proto.Uint32(ban.Duration)
+			// TODO: We may lose duration precision by converting it Uint32 from Uint64
+			//entry.Duration = proto.Uint64(ban.Duration)
+			entry.Duration = proto.Uint32(uint32(ban.Duration))
 			banList.Bans = append(banList.Bans, entry)
 		}
 		if err := client.sendMessage(banList); err != nil {
-			client.Panic("Unable to send BanList")
+			client.Panic(errors.New("Unable to send BanList"))
 		}
 	} else {
 		server.banLock.Lock()
@@ -982,8 +994,10 @@ func (server *Server) handleBanListMessage(client *Client, message *Message) {
 			if entry.Start != nil {
 				ban.SetISOStartDate(*entry.Start)
 			}
+			// TODO: Duration needs another look, it shuld be uint64 for good precision but stay backwards compatible with murmur
 			if entry.Duration != nil {
-				ban.Duration = *entry.Duration
+				// TODO: This conversion from 32 wont probably work
+				ban.Duration = int64(*entry.Duration)
 			}
 			server.Bans = append(server.Bans, ban)
 		}
@@ -991,7 +1005,8 @@ func (server *Server) handleBanListMessage(client *Client, message *Message) {
 		// TODO: Remove frozen bans
 		//server.UpdateFrozenBans(server.Bans)
 
-		client.Printf("BanList updated")
+		// TODO: Why is message calling client methods? This is really bad isolation of logic
+		//client.Printf("BanList updated")
 	}
 }
 
@@ -1023,7 +1038,7 @@ func (server *Server) handleTextMessage(client *Client, message *Message) {
 	// Tree
 	for _, channelID := range textMessage.TreeID {
 		// TODO: Using okay doesnt give you the opportunity to explain wtf is ahppening
-		if channel, ok := server.Channels[int(channelID)]; ok {
+		if channel, ok := server.Channels[channelID]; ok {
 			// TODO: Update hasPermission
 			//if !&channel.ACL.HasPermission(client, TextMessagePermission) {
 			//	client.sendPermissionDenied(client, channel, TextMessagePermission)
@@ -1037,7 +1052,7 @@ func (server *Server) handleTextMessage(client *Client, message *Message) {
 
 	// Direct-to-channel
 	for _, channelID := range textMessage.ChannelID {
-		if channel, ok := server.Channels[int(channelID)]; ok {
+		if channel, ok := server.Channels[channelID]; ok {
 			// TODO: HasPermission update
 			//if !&channel.ACL.HasPermission(client, TextMessagePermission) {
 			//	client.sendPermissionDenied(client, channel, TextMessagePermission)
@@ -1083,7 +1098,7 @@ func (server *Server) handleAclMessage(client *Client, message *Message) {
 	}
 
 	// Look up the channel this ACL message operates on.
-	channel, ok := server.Channels[int(*acl.ChannelID)]
+	channel, ok := server.Channels[*acl.ChannelID]
 	// TODO: return errors, so you can display them! This ok shit is not ok
 	if !ok {
 		return
@@ -1324,7 +1339,7 @@ func (server *Server) handleQueryUsers(client *Client, message *Message) {
 	}
 
 	// TODO: Don't do this, servers daemonize, so use a centralized logging system controlled by configuration
-	server.Printf("in handleQueryUsers")
+	//server.Printf("in handleQueryUsers")
 
 	reply := &mumbleproto.QueryUsers{}
 
@@ -1471,7 +1486,7 @@ func (server *Server) handleVoiceTarget(client *Client, message *Message) {
 	voiceTarget := &mumbleproto.VoiceTarget{}
 	err := proto.Unmarshal(message.buffer, voiceTarget)
 	if err != nil {
-		client.Panic(err.Error())
+		client.Panic(err)
 		return
 	}
 
@@ -1537,7 +1552,7 @@ func (server *Server) handlePermissionQuery(client *Client, message *Message) {
 		return
 	}
 
-	channel := server.Channels[int(*query.ChannelID)]
+	channel := server.Channels[*query.ChannelID]
 	server.sendClientPermissions(client, channel)
 }
 
@@ -1566,7 +1581,7 @@ func (server *Server) handleRequestBlob(client *Client, message *Message) {
 					// TODO: Replace this shit alter, just get the first major structure changes in
 					//buffer, err := blobStore.Get(target.user.TextureBlob)
 					//if err != nil {
-					//	server.Panicf("Blobstore error: %v", err)
+					//	server.Panic(err)
 					//	return
 					//}
 					//userState.Reset()
@@ -1618,12 +1633,12 @@ func (server *Server) handleRequestBlob(client *Client, message *Message) {
 	// TODO: Added up, there is SO MUCH WASTE. THESE ARE PER MESSAGE!
 	if len(requestBlob.ChannelDescription) > 0 {
 		for _, cid := range requestBlob.ChannelDescription {
-			if channel, ok := server.Channels[int(cid)]; ok {
+			if channel, ok := server.Channels[cid]; ok {
 				if channel.HasDescription() {
 					channelState.Reset()
 					//buffer, err := requestBlob.Get(channel.DescriptionBlob)
 					//if err != nil {
-					//	server.Panicf("Blobstore error: %v", err)
+					//	server.Panic(err)
 					//	return
 					//}
 					//// TODO: you should be asking yourself, if you are doing a conversion everytime you use a variable, is there something majorly wrong? the answer is yes

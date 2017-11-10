@@ -63,6 +63,7 @@ var (
 `
 )
 
+// TODO: These two functions likely belong in a common or config package/module/file
 func defaultDataDirectory() string {
 	// TODO: This is actually no longer the preferred location
 	// it should be in .local/config/mumble

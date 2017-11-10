@@ -17,8 +17,6 @@ type LogTarget struct {
 	memLog *bytes.Buffer
 }
 
-var Target LogTarget
-
 // Write writes a log message to all registered io.Writers
 func (target *LogTarget) Write(in []byte) (int, error) {
 	target.mu.Lock()

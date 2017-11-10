@@ -27,12 +27,12 @@ type Config struct {
 	// TODO: Define some default values
 	DataDirectory string // TODO: Only fucking one that should be a string!!!!
 	// TODO: Should this be uint? Itd be much faster for comparisons, if we are going to do these comparisons all the time anyways
-	MaxBandwidth       int
-	MaxUsers           int
-	MaxUsersPerChannel int
+	MaxBandwidth       uint32
+	MaxUsers           uint32
+	MaxUsersPerChannel uint32
 	// TODO: For fucks sake, we know this is checked every fucking message, and we are doing string comparison? Yep I've fucking lost it
-	MaxTestMessageLength  int
-	MaxImageMessageLength int
+	MaxTextMessageLength  uint32
+	MaxImageMessageLength uint32
 	AllowHTML             bool // TODO: Can we just use a bool? EVERY MESSAGE WE ARE CHECKING THIS? a bool as a string? for fucks sake
 	// TODO: Just read above todos and apply below, right now I just want something to build and work, so fuck everything but seriously, this is awful design
 	DefaultChannel       string
@@ -47,7 +47,8 @@ type Config struct {
 
 // Create a new Config using configMap as the intial internal config map.
 // If configMap is nil, ConfigWithMap will create a new config map.
-func New(configMap map[string]string) *Config {
+// TODO: Maybe attach this to server object?
+func NewConfig(configMap map[string]string) *Config {
 	if configMap == nil {
 		configMap = make(map[string]string)
 	}

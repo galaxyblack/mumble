@@ -16,7 +16,8 @@ type Channel struct {
 	children  map[uint32]*Channel
 
 	// ACL - Access control list
-	ACL acl
+	ACL  acl
+	ACLs []acl
 
 	// Links
 	Links map[uint32]*Channel

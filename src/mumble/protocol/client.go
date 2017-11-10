@@ -7,7 +7,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
-	"log"
+	//"log"
 	"net"
 	"runtime"
 	"time"
@@ -21,7 +21,8 @@ import (
 // TODO: Client validations should be going in this module, and tested individually, keep it dry and simple for testing
 type Client struct {
 	// Logging
-	*log.Logger
+	// TODO: No, centralize logging, and then have logTypes
+	//*log.Logger
 
 	// TODO: What is a log forwarder? Can it be replaced and this module simplified by just using existing logging library that is community maintained? Lets focus on what makes this DIFFERENt isntead of remaking every wheel worse than the community maintained libraries
 	//logForwarder *LogForwarder
@@ -99,9 +100,10 @@ type Client struct {
 
 // Debugf implements debug-level printing for Clients.
 // TODO: Seems like this should be isolated into a debug/log module and not reimplemented in each and every datatype. Nicht so DRY
-func (client *Client) Debugf(format string, v ...interface{}) {
-	client.Printf(format, v...)
-}
+// TODO: Move this to a central logging system, probably just use exsiting library and support only code related to mumbl
+//func (client *Client) Debugf(format string, v ...interface{}) {
+//	client.Printf(format, v...)
+//}
 
 // Is the client a registered user?
 // TODO: Doesn't seem like the appropriate way to do this check, we only check if the struct has the value set and not if the server has the user registered? Seems totally wrong and not actually checking what the fucntion name is implying
@@ -176,14 +178,10 @@ func (client *Client) IsVerified() bool {
 }
 
 // Log a panic and disconnect the client.
-func (client *Client) Panic(v ...interface{}) {
-	client.Print(v)
-	client.Disconnect()
-}
-
-// Log a formatted panic and disconnect the client.
-func (client *Client) Panicf(format string, v ...interface{}) {
-	client.Printf(format, v...)
+func (client *Client) Panic(err error) {
+	// TODO: maybe just pass the error and not the string
+	// TODO: A fail function is not a bad idea but each module should not be reimiplementing logging functionality
+	// TODO: Maybe return bool on successful disconnect?
 	client.Disconnect()
 }
 
@@ -206,7 +204,8 @@ func (client *Client) disconnect(kicked bool) {
 			close(client.clientReady)
 		}
 
-		client.Printf("Disconnected")
+		// TODO: Move this to central logging
+		//client.Printf("Disconnected")
 		client.connection.Close()
 
 		client.server.updateCodecVersions(nil)
@@ -288,31 +287,31 @@ func (c *Client) sendPermissionDeniedType(denyType mumbleproto.PermissionDenied_
 }
 
 // Send permission denied by type (and user)
-func (c *Client) sendPermissionDeniedTypeUser(denyType mumbleproto.PermissionDenied_DenyType, user *Client) {
+func (client *Client) sendPermissionDeniedTypeUser(denyType mumbleproto.PermissionDenied_DenyType, user *Client) {
 	permissionDenied := &mumbleproto.PermissionDenied{
 		Type: denyType.Enum(),
 	}
 	if user != nil {
 		permissionDenied.Session = proto.Uint32(user.Session())
 	}
-	err := c.sendMessage(permissionDenied)
+	err := client.sendMessage(permissionDenied)
 	if err != nil {
-		c.Panicf("%v", err.Error())
+		client.Panic(err)
 		return
 	}
 }
 
 // Send permission denied by who, what, where
-func (c *Client) sendPermissionDenied(who *Client, where *Channel, what uint32) {
+func (client *Client) sendPermissionDenied(who *Client, where *Channel, what uint32) {
 	permissionDenied := &mumbleproto.PermissionDenied{
-		Permission: proto.Uint32(uint32(what)),
+		Permission: proto.Uint32(what),
 		ChannelID:  proto.Uint32(where.ID),
 		Session:    proto.Uint32(who.Session()),
 		Type:       mumbleproto.PermissionDenied_Permission.Enum(),
 	}
-	err := c.sendMessage(permissionDenied)
+	err := client.sendMessage(permissionDenied)
 	if err != nil {
-		c.Panicf("%v", err.Error())
+		client.Panic(err)
 		return
 	}
 }
@@ -327,7 +326,7 @@ func (client *Client) sendPermissionDeniedFallback(denyType mumbleproto.Permissi
 	}
 	err := client.sendMessage(permissionDenied)
 	if err != nil {
-		client.Panicf("%v", err.Error())
+		client.Panic(err)
 		return
 	}
 }
@@ -395,14 +394,14 @@ func (client *Client) udpReceiveLoop() {
 				// TODO: We not really going to return this err?
 				err := client.SendUDP(buffer)
 				if err != nil {
-					client.Panicf("Unable to send UDP message: %v", err.Error())
+					client.Panic(err)
 				}
 			}
 
 		case mumbleproto.UDPMessagePing:
 			err := client.SendUDP(buffer)
 			if err != nil {
-				client.Panicf("Unable to send UDP message: %v", err.Error())
+				client.Panic(err)
 			}
 		}
 	}
@@ -485,7 +484,7 @@ func (client *Client) tlsReceiveLoop() {
 				if err == io.EOF {
 					client.Disconnect()
 				} else {
-					client.Panicf("%v", err)
+					client.Panic(err)
 				}
 				return
 			}
@@ -507,7 +506,7 @@ func (client *Client) tlsReceiveLoop() {
 				if err == io.EOF {
 					client.Disconnect()
 				} else {
-					client.Panicf("%v", err)
+					client.Panic(err)
 				}
 				return
 			}
@@ -551,7 +550,7 @@ func (client *Client) tlsReceiveLoop() {
 				if err == io.EOF {
 					client.Disconnect()
 				} else {
-					client.Panicf("%v", err)
+					client.Panic(err)
 				}
 				return
 			}
@@ -559,7 +558,7 @@ func (client *Client) tlsReceiveLoop() {
 			version := &mumbleproto.Version{}
 			err = proto.Unmarshal(message.buffer, version)
 			if err != nil {
-				client.Panicf("%v", err)
+				client.Panic(err)
 				return
 			}
 
@@ -652,7 +651,7 @@ func (client *Client) sendChannelTree(channel *Channel) {
 
 	err := client.sendMessage(channelState)
 	if err != nil {
-		client.Panicf("%v", err)
+		client.Panic(err)
 	}
 
 	for _, childChannel := range channel.children {
@@ -662,16 +661,17 @@ func (client *Client) sendChannelTree(channel *Channel) {
 
 // Try to do a crypto resync
 func (client *Client) cryptResync() {
-	client.Debugf("requesting crypt resync")
+	// TODO: Move this to central logging
+	//client.Debugf("requesting crypt resync")
 	goodElapsed := time.Now().Unix() - client.crypt.LastGoodTime
 	if goodElapsed > 5 {
 		requestElapsed := time.Now().Unix() - client.lastResync
 		if requestElapsed > 5 {
 			client.lastResync = time.Now().Unix()
-			cryptsetup := &mumbleproto.CryptSetup{}
-			err := client.sendMessage(cryptsetup)
+			cryptSetup := &mumbleproto.CryptSetup{}
+			err := client.sendMessage(cryptSetup)
 			if err != nil {
-				client.Panicf("%v", err)
+				client.Panic(err)
 			}
 		}
 	}

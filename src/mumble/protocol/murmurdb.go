@@ -43,8 +43,9 @@ func MurmurImport(filename string) (err error) {
 		panic(err.Error())
 	}
 
-	var serverIDs []int64
-	var sid int64
+	// TODO: Use a standardized struct not local inline variables randomly initialized in massive fucns
+	var serverIDs []uint32
+	var sid uint32
 	for rows.Next() {
 		err = rows.Scan(&sid)
 		if err != nil {
@@ -63,7 +64,7 @@ func MurmurImport(filename string) (err error) {
 
 		// TODO: Confine like logic, Args should ONLY be in the command files, rest should rely on configuration created or defined by command execution
 		// TODO: Grab a server and use the servers configuration file to know where to pullf rom
-		err = os.Mkdir(filepath.Join(strconv.FormatInt(sid, 10)), 0750)
+		err = os.Mkdir(filepath.Join(strconv.FormatUint(uint64(sid), 10)), 0750)
 		if err != nil {
 			return err
 		}
@@ -81,7 +82,7 @@ func MurmurImport(filename string) (err error) {
 }
 
 // Create a new Server from a Murmur SQLite database
-func NewServerFromSQLite(id int64, db *sql.DB) (server *Server, err error) {
+func NewServerFromSQLite(id uint32, db *sql.DB) (server *Server, err error) {
 	server, err = NewServer(id)
 	if err != nil {
 		return nil, err
@@ -294,7 +295,7 @@ func populateChannelGroupsFromDatabase(server *Server, channel *Channel, db *sql
 
 // Populate the Server with Channels from the database.
 func populateChannelsFromDatabase(server *Server, db *sql.DB, parentID uint32) error {
-	parentChannel, exists := server.Channels[int(parentID)]
+	parentChannel, exists := server.Channels[parentID]
 	if !exists {
 		return errors.New("Non-existant parent")
 	}
@@ -323,12 +324,13 @@ func populateChannelsFromDatabase(server *Server, db *sql.DB, parentID uint32) e
 
 		channel := NewChannel(channelID, name)
 		server.Channels[channel.ID] = channel
-		channel.ACL.InheritACL = inherit
+		// TODO: Repair after fixing ACL system with embedded db
+		//channel.ACL.InheritACL = inherit
 		parentChannel.AddChild(channel)
 	}
 
 	// Add channel_info
-	for _, childChannel := range parent.children {
+	for _, childChannel := range parentChannel.children {
 		err = populateChannelInfoFromDatabase(server, childChannel, db)
 		if err != nil {
 			return err
@@ -336,7 +338,7 @@ func populateChannelsFromDatabase(server *Server, db *sql.DB, parentID uint32) e
 	}
 
 	// Add ACLs
-	for _, childChannel := range parent.children {
+	for _, childChannel := range parentChannel.children {
 		err = populateChannelACLFromDatabase(server, childChannel, db)
 		if err != nil {
 			return err
@@ -344,7 +346,7 @@ func populateChannelsFromDatabase(server *Server, db *sql.DB, parentID uint32) e
 	}
 
 	// Add groups
-	for _, childChannel := range parent.children {
+	for _, childChannel := range parentChannel.children {
 		err = populateChannelGroupsFromDatabase(server, childChannel, db)
 		if err != nil {
 			return err
@@ -352,7 +354,7 @@ func populateChannelsFromDatabase(server *Server, db *sql.DB, parentID uint32) e
 	}
 
 	// Add subchannels
-	for id, _ := range parent.children {
+	for id, _ := range parentChannel.children {
 		err = populateChannelsFromDatabase(server, db, id)
 		if err != nil {
 			return err
@@ -377,8 +379,8 @@ func populateChannelLinkInfo(server *Server, db *sql.DB) (err error) {
 	for rows.Next() {
 		// TODO: Use structs stop wasting memory with inline local variables that are not even being actively unallacated
 		var (
-			ChannelID int
-			LinkID    int
+			ChannelID uint32
+			LinkID    uint32
 		)
 		if err := rows.Scan(&ChannelID, &LinkID); err != nil {
 			return err
@@ -414,13 +416,13 @@ func populateUsers(server *Server, db *sql.DB) (err error) {
 
 	for rows.Next() {
 		var (
-			UserID   int64
+			UserID   uint32
 			UserName string
 			// TODO: 2017 we dont use easily broken hashes like SHA1 bitte bitte bitte
 			SHA1Password string
-			LastChannel  int
+			LastChannel  uint32
 			Texture      []byte
-			LastActive   int64
+			LastActive   uint64
 		)
 
 		err = rows.Scan(&UserID, &UserName, &SHA1Password, &LastChannel, &Texture, &LastActive)
@@ -429,37 +431,39 @@ func populateUsers(server *Server, db *sql.DB) (err error) {
 		}
 
 		if UserID == 0 {
-			// TODO: We can do better
+			// TODO: We can do better, 2017, dont use sha1
 			server.config.Set("SuperUserPassword", "sha1$$"+SHA1Password)
 		}
 
-		user, err := NewUser(uint32(UserId), UserName)
+		user, err := NewUser(UserID, UserName)
 		if err != nil {
 			return err
 		}
 
 		if len(Texture) > 0 {
-			key, err := blobStore.Put(Texture)
-			if err != nil {
-				return err
-			}
-			user.TextureBlob = key
+			// TODO: Update blobstore after a embedded db is up
+			//key, err := blobStore.Put(Texture)
+			//if err != nil {
+			//	return err
+			//}
+			//user.TextureBlob = key
 		}
 
+		// TODO: Why does this need to be typecast? Why not just have the LastActive attribute be that type?
 		user.LastActive = uint64(LastActive)
-		user.LastChannelId = LastChannel
+		user.LastChannelID = LastChannel
 
-		server.Users[user.Id] = user
+		server.Users[user.ID] = user
 	}
 
-	stmt, err = db.Prepare("SELECT key, value FROM user_info WHERE server_id=? AND user_id=?")
+	sqlStatement, err = db.Prepare("SELECT key, value FROM user_info WHERE server_id=? AND user_id=?")
 	if err != nil {
 		return
 	}
 
 	// Populate users with any new-style UserInfo records
 	for uid, user := range server.Users {
-		rows, err = stmt.Query(server.Id, uid)
+		rows, err = sqlStatement.Query(server.ID, uid)
 		if err != nil {
 			return err
 		}
@@ -479,13 +483,15 @@ func populateUsers(server *Server, db *sql.DB) (err error) {
 			case UserInfoEmail:
 				user.Email = Value
 			case UserInfoComment:
-				key, err := blobStore.Put([]byte(Value))
-				if err != nil {
-					return err
-				}
-				user.CommentBlob = key
+				// TODO: Fix blobstore after first wave refactor
+				//key, err := blobStore.Put([]byte(Value))
+				//if err != nil {
+				//	return err
+				//}
+				//user.CommentBlob = key
 			case UserInfoHash:
-				user.CertHash = Value
+				// TODO: So why Certificate over Cert? Because there are other words with the Cert base that could possibly/reasonably work
+				user.CertificateHash = Value
 			case UserInfoLastActive:
 				// not a kv-pair (trigger)
 			case UserInfoPassword:
@@ -495,31 +501,31 @@ func populateUsers(server *Server, db *sql.DB) (err error) {
 			}
 		}
 	}
-
 	return
 }
 
 // Populate bans
 func populateBans(server *Server, db *sql.DB) (err error) {
-	stmt, err := db.Prepare("SELECT base, mask, name, hash, reason, start, duration FROM bans WHERE server_id=?")
+	sqlStatement, err := db.Prepare("SELECT base, mask, name, hash, reason, start, duration FROM bans WHERE server_id=?")
 	if err != nil {
 		return
 	}
 
-	rows, err := stmt.Query(server.Id)
+	rows, err := sqlStatement.Query(server.ID)
 	if err != nil {
 		return err
 	}
 
 	for rows.Next() {
+		// TODO: Use structs not inline local variables
 		var (
-			Ban       ban.Ban
+			Ban       Ban
 			IP        []byte
 			StartDate string
 			Duration  int64
 		)
 
-		err = rows.Scan(&IP, &Ban.Mask, &Ban.Username, &Ban.CertHash, &Ban.Reason, &StartDate, &Duration)
+		err = rows.Scan(&IP, &Ban.Mask, &Ban.Username, &Ban.CertificateHash, &Ban.Reason, &StartDate, &Duration)
 		if err != nil {
 			return err
 		}
@@ -531,7 +537,7 @@ func populateBans(server *Server, db *sql.DB) (err error) {
 		}
 
 		Ban.SetISOStartDate(StartDate)
-		Ban.Duration = uint32(Duration)
+		Ban.Duration = Duration
 
 		server.Bans = append(server.Bans, Ban)
 	}

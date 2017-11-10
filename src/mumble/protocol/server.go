@@ -65,7 +65,7 @@ type Server struct {
 	voiceBroadcast chan *VoiceBroadcast
 	configUpdate   chan *KeyValuePair
 	// TODO: What? Can't be needed
-	tempRemove chan *Channel
+	temporaryRemove chan *Channel
 
 	// Signals to the server that a client has been successfully
 	// authenticated.
@@ -91,14 +91,15 @@ type Server struct {
 	Opus             bool
 
 	// Channels
-	Channels   map[int]*Channel
-	nextChanID int
+	Channels      map[uint32]*Channel
+	nextChannelID uint32
 
 	// Users
-	Users       map[uint32]*User
-	UserCertMap map[string]*User
-	UserNameMap map[string]*User
-	nextUserID  uint32
+	// TODO: Get this shit in a nested struct and in a embedded db
+	Users              map[uint32]*User
+	UserCertificateMap map[string]*User
+	UserNameMap        map[string]*User
+	nextUserID         uint32
 
 	// Sessions
 	pool *SessionPool
@@ -106,7 +107,7 @@ type Server struct {
 	// Freezer
 	// TODO: This freezer stuff is really bad, I would prefer to just use something like bolt, an embedded key/value store and let it do this
 	// that way we can avoid writing the same code worse
-	numLogOps int
+	logLength int
 	freezeLog *Log
 
 	// Bans
@@ -124,7 +125,7 @@ type clientLogForwarder struct {
 
 func (logForwarder clientLogForwarder) Write(incoming []byte) (int, error) {
 	buffer := new(bytes.Buffer)
-	buffer.WriteString(fmt.Sprintf("<%v:%v(%v)> ", logForwarder.client.Session(), lf.client.ShownName(), lf.client.UserId()))
+	buffer.WriteString(fmt.Sprintf("<%v:%v(%v)> ", logForwarder.client.Session(), logForwarder.client.ShownName(), logForwarder.client.UserID()))
 	buffer.Write(incoming)
 	logForwarder.logger.Output(3, buffer.String())
 	return len(incoming), nil
@@ -134,35 +135,30 @@ func (logForwarder clientLogForwarder) Write(incoming []byte) (int, error) {
 // TODO: Every other function uses the local name server, why is this using s? Consistency is always best practice
 // TODO: What? Why are we passing the ID? Generate a god damn ID, don't have us pass it, get all other shit from config, you want a server name? CONFIG!
 // TODO: Also maybe break up into new and init? Ruby had some good ideas with that
-func NewServer(id int64) (server *Server, err error) {
+func NewServer(id uint32) (server *Server, err error) {
+	// TODO: There are cleaner ways to initialize structs
 	server = new(Server)
 	server.ID = id
 
 	// TODO: What the fuck? No pull this directly from JSON. Rule is: Runtime configuration > Environmental Variables > Config > Default values.
 	// this is how you make software that is not annoying as fuck to use for people you know. like not shitty, works without any config, but it can generate a blank from default if nothing is defined and easily overridden in the expected way.
-	server.config = serverConf.New(nil)
+	//emptyConfig := make(map[string]string)
+	//server.config.configMap = NewConfig(emptyConfig)
 
 	// TODO: Whats the point of the SQL db if we arent going to put the users there? Lets move this to key/value, this is insane
 	// BoltDB? Fast and on-disk like the freeze shit or completely in memory database that has better way of organizing than just maps/hashes  AT THE VERY LEAST, LETS NOT USE STRING FUCKING IDS FOR FUCKS SAKE! AND LETS USE PREFIX radix based lookup? is it worth it to use a pure go implementation and cut out more code?
 	server.Users = make(map[uint32]*User)
-	server.UserCertMap = make(map[string]*User)
+	server.UserCertificateMap = make(map[string]*User)
 	server.UserNameMap = make(map[string]*User)
 	server.Users[0], err = NewUser(0, "SuperUser")
 	server.UserNameMap["SuperUser"] = server.Users[0]
 	server.nextUserID = 1
-
-	server.Channels = make(map[int]*Channel)
+	server.Channels = make(map[uint32]*Channel)
 	server.Channels[0] = NewChannel(0, "Root")
-	server.nextChanID = 1
-
-	server.Logger = log.New(&logtarget.Target, fmt.Sprintf("[%v] ", server.ID), log.LstdFlags|log.Lmicroseconds)
+	server.nextChannelID = 1
+	server.Logger = log.New(&LogTarget{}, fmt.Sprintf("[%v] ", server.ID), log.LstdFlags|log.Lmicroseconds)
 
 	return
-}
-
-// Debugf implements debug-level printing for Servers.
-func (server *Server) Debugf(format string, v ...interface{}) {
-	server.Printf(format, v...)
 }
 
 // Get a pointer to the root channel
@@ -175,6 +171,7 @@ func (server *Server) RootChannel() *Channel {
 }
 
 // Set password as the new SuperUser password
+// TODO: Use correct password hashing, add 2nd factor, keypair based OTP, and keypair based guest system with registration optional
 func (server *Server) SetSuperUserPassword(password string) {
 	saltBytes := make([]byte, 24)
 	_, err := rand.Read(saltBytes)
@@ -192,15 +189,15 @@ func (server *Server) SetSuperUserPassword(password string) {
 	// TODO: No this does matter, jesus fucking christ, it fucking matters!
 	// TODO: Also don't use sha1, come on, its 2017
 	key := "SuperUserPassword"
-	val := "sha1$" + salt + "$" + digest
-	server.cfg.Set(key, val)
-	server.cfgUpdate <- &KeyValuePair{Key: key, Value: val}
+	value := "sha1$" + salt + "$" + digest
+	server.config.Set(key, value)
+	server.configUpdate <- &KeyValuePair{Key: key, Value: value}
 }
 
 // Check whether password matches the set SuperUser password.
 // TODO: Add shared secrets, ephemeral keying, OTP, 2nd-factor, etc
 func (server *Server) CheckSuperUserPassword(password string) bool {
-	parts := strings.Split(server.cfg.StringValue("SuperUserPassword"), "$")
+	parts := strings.Split(server.config.StringValue("SuperUserPassword"), "$")
 	if len(parts) != 3 {
 		return false
 	}
@@ -209,10 +206,11 @@ func (server *Server) CheckSuperUserPassword(password string) bool {
 		return false
 	}
 
-	var h hash.Hash
+	// TODO: Fuck sha1 seriously
+	var hash hash.Hash
 	switch parts[0] {
 	case "sha1":
-		h = sha1.New()
+		hash = sha1.New()
 	default:
 		// no such hash
 		return false
@@ -224,13 +222,13 @@ func (server *Server) CheckSuperUserPassword(password string) bool {
 		if err != nil {
 			server.Fatalf("Unable to decode salt: %v", err)
 		}
-		h.Write(saltBytes)
+		hash.Write(saltBytes)
 	}
 
 	// password
-	h.Write([]byte(password))
+	hash.Write([]byte(password))
 
-	sum := hex.EncodeToString(h.Sum(nil))
+	sum := hex.EncodeToString(hash.Sum(nil))
 	// TODO: Use DeepCompare not just ==
 	if parts[2] == sum {
 		return true
@@ -251,11 +249,12 @@ func (server *Server) handleIncomingClient(connection net.Conn) (err error) {
 		return
 	}
 
-	client.logForwarder = &clientLogForwarder{client, server.Logger}
-	client.Logger = log.New(client.logForwarder, "", 0)
+	// TODO: Nothanks, central logging bitte
+	//client.logForwarder = &clientLogForwarder{client, server.Logger}
+	//client.Logger = log.New(client.logForwarder, "", 0)
 
 	client.session = server.pool.Get()
-	client.Printf("New connection: %v (%v)", connection.RemoteAddr(), client.Session())
+	//client.Printf("New connection: %v (%v)", connection.RemoteAddr(), client.Session())
 
 	client.tcpAddr = addr.(*net.TCPAddr)
 	client.server = server
@@ -274,23 +273,23 @@ func (server *Server) handleIncomingClient(connection net.Conn) (err error) {
 	tlsConnection := client.connection.(*tls.Conn)
 	err = tlsConnection.Handshake()
 	if err != nil {
-		client.Printf("TLS handshake failed: %v", err)
+		//client.Printf("TLS handshake failed: %v", err)
 		client.Disconnect()
 		return
 	}
 
-	state := tlsc.ConnectionState()
+	state := tlsConnection.ConnectionState()
 	if len(state.PeerCertificates) > 0 {
 		// TODO: Sha1? No thank you. Same library has better security hashing, no reason to do this.
 		hash := sha1.New()
 		hash.Write(state.PeerCertificates[0].Raw)
 		sum := hash.Sum(nil)
-		client.certHash = hex.EncodeToString(sum)
+		client.certificateHash = hex.EncodeToString(sum)
 	}
 
 	// Check whether the client's cert hash is banned
-	if server.IsCertHashBanned(client.CertHash()) {
-		client.Printf("Certificate hash is banned")
+	if server.IsCertificateHashBanned(client.CertificateHash()) {
+		//client.Printf("Certificate hash is banned")
 		client.Disconnect()
 		return
 	}
@@ -336,10 +335,10 @@ func (server *Server) RemoveClient(client *Client, kicked bool) {
 	// TODO: Why is kicked check not its own function? Why is it a local variable and not a attribute of the user?
 	if !kicked && client.state > StateClientAuthenticated {
 		err := server.broadcastProtoMessage(&mumbleproto.UserRemove{
-			Session: uint32(client.Session()),
+			Session: proto.Uint32(client.Session()),
 		})
 		if err != nil {
-			server.Panic("Unable to broadcast UserRemove message for disconnected client.")
+			server.Panic(errors.New("Unable to broadcast UserRemove message for disconnected client."))
 		}
 	}
 }
@@ -358,7 +357,7 @@ func (server *Server) AddChannel(name string) (channel *Channel) {
 func (server *Server) RemoveChanel(channel *Channel) {
 	// TODO: Move validaiton to its own function, see every other comment for the various reasons
 	if channel.ID == 0 {
-		server.Printf("Attempted to remove root channel.")
+		//server.Printf("Attempted to remove root channel.")
 		return
 	}
 
@@ -389,34 +388,35 @@ func (server *Server) handlerLoop() {
 		case <-server.bye:
 			return
 		// Control channel messages
-		case msg := <-server.incoming:
-			client := msg.client
-			server.handleIncomingMessage(client, msg)
+		case message := <-server.incoming:
+			client := message.client
+			server.handleIncomingMessage(client, message)
 		// Voice broadcast
 		case broadcast := <-server.voiceBroadcast:
 			if broadcast.target == 0 { // Current channel
-				channel := vb.client.Channel
+				channel := broadcast.client.Channel
 				for _, client := range channel.clients {
 					if client != broadcast.client {
-						err := client.SendUDP(broadcast.buf)
+						err := client.SendUDP(broadcast.buffer)
 						if err != nil {
-							client.Panicf("Unable to send UDP: %v", err)
+							client.Panic(err)
 						}
 					}
 				}
 			} else {
-				target, ok := broadcast.client.voiceTargets[uint32(broadcast.target)]
-				if !ok {
+				target, success := broadcast.client.voiceTargets[uint32(broadcast.target)]
+				if !success {
 					continue
 				}
 
 				target.SendVoiceBroadcast(broadcast)
 			}
 		// Remove a temporary channel
-		case temporaryChannel := <-server.temporaryRemove:
-			if temporaryChannel.IsEmpty() {
-				server.RemoveChannel(temporaryChannel)
-			}
+		// TODO: temporaryChannel implementing
+		//case temporaryChannel := <-server.temporaryRemove:
+		//	if temporaryChannel.IsEmpty() {
+		//		server.RemoveChannel(temporaryChannel)
+		//	}
 		// Finish client authentication. Send post-authentication
 		// server info.
 		case client := <-server.clientAuthenticated:
@@ -424,28 +424,28 @@ func (server *Server) handlerLoop() {
 		// Disk freeze config update
 		case kvp := <-server.configUpdate:
 			if !kvp.Reset {
-				server.UpdateConfig(kvp.Key, kvp.Value)
+				//server.UpdateConfig(kvp.Key, kvp.Value)
 			} else {
-				server.ResetConfig(kvp.Key)
+				//server.ResetConfig(kvp.Key)
 			}
 
 		// Server registration update
 		// Tick every hour + a minute offset based on the server id.
-		case <-regtick:
+		case <-regTick:
 			server.RegisterPublicServer()
 		}
 
 		// Check if its time to sync the server state and re-open the log
 		// TODO: Why? And if we are doing this lets just use an embedded DB that can handle this logic, simplify our code and reduce bugs by sharing solutions with the community
-		if server.numLogs >= LogsBeforeSync {
-			server.Print("Writing full server snapshot to disk")
-			err := server.FreezeToFile()
-			if err != nil {
-				server.Fatal(err)
-			}
-			server.numLogs = 0
-			server.Print("Wrote full server snapshot to disk")
-		}
+		//if server.logLength >= LogsBeforeSync {
+		//server.Print("Writing full server snapshot to disk")
+		//err := server.FreezeToFile()
+		//if err != nil {
+		//	server.Fatal(err)
+		//}
+		//server.logLength = 0
+		//server.Print("Wrote full server snapshot to disk")
+		//}
 	}
 }
 
@@ -455,17 +455,17 @@ func (server *Server) handlerLoop() {
 // Once a user has been authenticated, it will ping the server's handler
 // routine, which will call the finishAuthenticate method on Server which
 // will send the channel tree, user list, etc. to the client.
-func (server *Server) handleAuthenticate(client *Client, msg *Message) {
+func (server *Server) handleAuthenticate(client *Client, message *Message) {
 	// Is this message not an authenticate message? If not, discard it...
-	if msg.kind != mumbleproto.MessageAuthenticate {
-		client.Panic("Unexpected message. Expected Authenticate.")
+	if message.kind != mumbleproto.MessageAuthenticate {
+		client.Panic(errors.New("Unexpected message. Expected Authenticate."))
 		return
 	}
 
 	auth := &mumbleproto.Authenticate{}
-	err := proto.Unmarshal(msg.buffer, auth)
+	err := proto.Unmarshal(message.buffer, auth)
 	if err != nil {
-		client.Panic("Unable to unmarshal Authenticate message.")
+		client.Panic(errors.New("Unable to unmarshal Authenticate message."))
 		return
 	}
 
@@ -494,9 +494,9 @@ func (server *Server) handleAuthenticate(client *Client, msg *Message) {
 			return
 		} else {
 			if server.CheckSuperUserPassword(*auth.Password) {
-				ok := false
-				client.user, ok = server.UserNameMap[client.Username]
-				if !ok {
+				var success bool
+				client.user, success = server.UserNameMap[client.Username]
+				if !success {
 					client.RejectAuth(mumbleproto.Reject_InvalidUsername, "")
 					return
 				}
@@ -509,7 +509,7 @@ func (server *Server) handleAuthenticate(client *Client, msg *Message) {
 		// First look up registration by name.
 		user, exists := server.UserNameMap[client.Username]
 		if exists {
-			if client.HasCertificate() && user.CertHash == client.CertHash() {
+			if client.HasCertificate() && user.CertificateHash == client.CertificateHash() {
 				client.user = user
 			} else {
 				client.RejectAuth(mumbleproto.Reject_WrongUserPW, "Wrong certificate hash")
@@ -519,7 +519,7 @@ func (server *Server) handleAuthenticate(client *Client, msg *Message) {
 
 		// Name matching didn't do.  Try matching by certificate.
 		if client.user == nil && client.HasCertificate() {
-			user, exists := server.UserCertMap[client.CertHash()]
+			user, exists := server.UserCertificateMap[client.CertificateHash()]
 			if exists {
 				client.user = user
 			}
@@ -529,7 +529,7 @@ func (server *Server) handleAuthenticate(client *Client, msg *Message) {
 	// Setup the cryptstate for the client.
 	err = client.crypt.GenerateKey(client.CryptoMode)
 	if err != nil {
-		client.Panicf("%v", err)
+		client.Panic(err)
 		return
 	}
 
@@ -542,7 +542,7 @@ func (server *Server) handleAuthenticate(client *Client, msg *Message) {
 		ServerNonce: client.crypt.EncryptIV,
 	})
 	if err != nil {
-		client.Panicf("%v", err)
+		client.Panic(err)
 	}
 
 	// Add codecs
@@ -585,9 +585,11 @@ func (server *Server) finishAuthenticate(client *Client) {
 	server.clients[client.Session()] = client
 
 	// Warn clients without CELT support that they might not be able to talk to everyone else.
-	if len(client.codecs) == 0 {
+	// TODO: This is just validation for not lempty, don't count more than 1
+	// TODO:VALIDATE: Not empty
+	if &(client.codecs[0]) != nil {
 		client.codecs = []int32{CeltCompatBitstream}
-		server.Printf("Client %v connected without CELT codecs. Faking compat bitstream.", client.Session())
+		//server.Printf("Client %v connected without CELT codecs. Faking compat bitstream.", client.Session())
 		if server.Opus && !client.opus {
 			client.sendMessage(&mumbleproto.TextMessage{
 				Session: []uint32{client.Session()},
@@ -615,28 +617,29 @@ func (server *Server) finishAuthenticate(client *Client) {
 		}
 	}
 
-	userstate := &mumbleproto.UserState{
+	userState := &mumbleproto.UserState{
 		Session:   proto.Uint32(client.Session()),
 		Name:      proto.String(client.ShownName()),
-		ChannelID: proto.Uint32(uint32(channel.ID)),
+		ChannelID: proto.Uint32(channel.ID),
 	}
 
 	if client.HasCertificate() {
-		userstate.Hash = proto.String(client.CertificateHash())
+		userState.Hash = proto.String(client.CertificateHash())
 	}
 
 	if client.IsRegistered() {
-		userstate.UserID = proto.Uint32(uint32(client.UserID()))
+		userState.UserID = proto.Uint32(client.UserID())
 		if client.user.HasTexture() {
 			// Does the client support blobs?
 			if client.Version >= 0x10203 {
 				userState.TextureHash = client.user.TextureBlobHashBytes()
 			} else {
-				buffer, err := blobStore.Get(client.user.TextureBlob)
-				if err != nil {
-					server.Panicf("Blobstore error: %v", err.Error())
-				}
-				userState.Texture = buffer
+				// TODO: uhh just do this later
+				//buffer, err := blobStore.Get(client.user.TextureBlob)
+				//if err != nil {
+				//	server.Panic(err)
+				//}
+				//userState.Texture = buffer
 			}
 		}
 
@@ -645,11 +648,12 @@ func (server *Server) finishAuthenticate(client *Client) {
 			if client.Version >= 0x10203 {
 				userState.CommentHash = client.user.CommentBlobHashBytes()
 			} else {
-				buffer, err := blobStore.Get(client.user.CommentBlob)
-				if err != nil {
-					server.Panicf("Blobstore error: %v", err.Error())
-				}
-				userstate.Comment = proto.String(string(buffer))
+				// TODO: uhh do this later
+				//buffer, err := blobStore.Get(client.user.CommentBlob)
+				//if err != nil {
+				//	server.Panic(err)
+				//}
+				//userState.Comment = proto.String(string(buffer))
 			}
 		}
 	}
@@ -663,11 +667,11 @@ func (server *Server) finishAuthenticate(client *Client) {
 
 	sync := &mumbleproto.ServerSync{}
 	// TODO: Can we have key based sessions? Making them a bit harder to iterate and allow prefix tree lookups?
-	sync.Session = client.Session()
-	sync.MaxBandwidth = server.config.MaxBandwidth
-	sync.WelcomeText = server.config.WelcomeText
+	sync.Session = proto.Uint32(client.Session())
+	sync.MaxBandwidth = proto.Uint32(server.config.MaxBandwidth)
+	sync.WelcomeText = proto.String(server.config.WelcomeText)
 	if client.IsSuperUser() {
-		sync.Permissions = uint64(acl.AllPermissions)
+		sync.Permissions = proto.Uint64(AllPermissions)
 	} else {
 		// fixme(mkrautz): previously we calculated the user's
 		// permissions and sent them to the client in here. This
@@ -677,17 +681,17 @@ func (server *Server) finishAuthenticate(client *Client) {
 		sync.Permissions = nil
 	}
 	if err := client.sendMessage(sync); err != nil {
-		client.Panicf("%v", err)
+		client.Panic(err)
 		return
 	}
 
 	err := client.sendMessage(&mumbleproto.ServerConfig{
-		AllowHtml:          server.config.AllowHTML,
-		MessageLength:      server.config.MaxTextMessageLength,
-		ImageMessageLength: server.config.MaxImageMessageLength,
+		AllowHtml:          proto.Bool(server.config.AllowHTML),
+		MessageLength:      proto.Uint32(server.config.MaxTextMessageLength),
+		ImageMessageLength: proto.Uint32(server.config.MaxImageMessageLength),
 	})
 	if err != nil {
-		client.Panicf("%v", err)
+		client.Panic(err)
 		return
 	}
 
@@ -696,15 +700,16 @@ func (server *Server) finishAuthenticate(client *Client) {
 }
 
 func (server *Server) updateCodecVersions(connecting *Client) {
-	codecusers := map[int32]int{}
+	codecUsers := map[int32]int{}
+	// TODO: Ugghh fuck use strucs
 	var (
-		winner     int32
-		count      int
-		users      int
-		opus       int
-		enableOpus bool
-		txtMsg     *mumbleproto.TextMessage = &mumbleproto.TextMessage{
-			Message: "<strong>WARNING:</strong> Your client doesn't support the Opus codec the server is switching to, you won't be able to talk or hear anyone. Please upgrade to a client with Opus support.",
+		winner      int32
+		count       int
+		users       int
+		opus        int
+		enableOpus  bool
+		textMessage *mumbleproto.TextMessage = &mumbleproto.TextMessage{
+			Message: proto.String("<strong>WARNING:</strong> Your client doesn't support the Opus codec the server is switching to, you won't be able to talk or hear anyone. Please upgrade to a client with Opus support."),
 		}
 	)
 
@@ -713,6 +718,7 @@ func (server *Server) updateCodecVersions(connecting *Client) {
 		if client.opus {
 			opus++
 		}
+		// TODO: No this can't be right
 		for _, codec := range client.codecs {
 			codecUsers[codec] += 1
 		}
@@ -728,6 +734,7 @@ func (server *Server) updateCodecVersions(connecting *Client) {
 		}
 	}
 
+	// TODO: No, positions/index should likely be uint
 	var current int32
 	if server.PreferAlphaCodec {
 		current = server.AlphaCodec
@@ -752,8 +759,8 @@ func (server *Server) updateCodecVersions(connecting *Client) {
 		}
 	} else if server.Opus == enableOpus {
 		if server.Opus && connecting != nil && !connecting.opus {
-			txtMsg.Session = []uint32{connecting.Session()}
-			connecting.sendMessage(txtMsg)
+			textMessage.Session = []uint32{connecting.Session()}
+			connecting.sendMessage(textMessage)
 		}
 		return
 	}
@@ -767,27 +774,27 @@ func (server *Server) updateCodecVersions(connecting *Client) {
 		Opus:        proto.Bool(server.Opus),
 	})
 	if err != nil {
-		server.Printf("Unable to broadcast.")
+		//server.Printf("Unable to broadcast.")
 		return
 	}
 
 	if server.Opus {
 		for _, client := range server.clients {
 			if !client.opus && client.state == StateClientReady {
-				textMsg.Session = []uint32{connecting.Session()}
-				err := client.sendMessage(textMsg)
+				textMessage.Session = []uint32{connecting.Session()}
+				err := client.sendMessage(textMessage)
 				if err != nil {
-					client.Panicf("%v", err)
+					client.Panic(err)
 				}
 			}
 		}
 		if connecting != nil && !connecting.opus {
-			textMsg.Session = []uint32{connecting.Session()}
-			connecting.sendMessage(textMsg)
+			textMessage.Session = []uint32{connecting.Session()}
+			connecting.sendMessage(textMessage)
 		}
 	}
 
-	server.Printf("CELT codec switch %#x %#x (PreferAlpha %v) (Opus %v)", uint32(server.AlphaCodec), uint32(server.BetaCodec), server.PreferAlphaCodec, server.Opus)
+	//server.Printf("CELT codec switch %#x %#x (PreferAlpha %v) (Opus %v)", uint32(server.AlphaCodec), uint32(server.BetaCodec), server.PreferAlphaCodec, server.Opus)
 	return
 }
 
@@ -800,29 +807,30 @@ func (server *Server) sendUserList(client *Client) {
 			continue
 		}
 
-		userstate := &mumbleproto.UserState{
+		userState := &mumbleproto.UserState{
 			Session:   proto.Uint32(connectedClient.Session()),
 			Name:      proto.String(connectedClient.ShownName()),
-			ChannelID: proto.Uint32(uint32(connectedClient.Channel.ID)),
+			ChannelID: proto.Uint32(connectedClient.Channel.ID),
 		}
 
 		if connectedClient.HasCertificate() {
-			userstate.Hash = proto.String(connectedClient.CertHash())
+			userState.Hash = proto.String(connectedClient.CertificateHash())
 		}
 
 		if connectedClient.IsRegistered() {
-			userstate.UserID = proto.Uint32(uint32(connectedClient.UserID()))
+			userState.UserID = proto.Uint32(connectedClient.UserID())
 
 			if connectedClient.user.HasTexture() {
 				// Does the client support blobs?
 				if client.Version >= 0x10203 {
 					userState.TextureHash = connectedClient.user.TextureBlobHashBytes()
 				} else {
-					buffer, err := BlobStoreGet(connectedClient.user.TextureBlob)
-					if err != nil {
-						server.Panicf("Blobstore error: %v", err.Error())
-					}
-					userState.Texture = buffer
+					// TODO: worry about this after structure changes
+					//buffer, err := blobStore.Get(connectedClient.user.TextureBlob)
+					//if err != nil {
+					//	server.Panic(err)
+					//}
+					//userState.Texture = buffer
 				}
 			}
 
@@ -832,38 +840,40 @@ func (server *Server) sendUserList(client *Client) {
 				if client.Version >= 0x10203 {
 					userState.CommentHash = connectedClient.user.CommentBlobHashBytes()
 				} else {
-					buffer, err := BlobStoreGet(connectedClient.user.CommentBlob)
-					if err != nil {
-						server.Panicf("Blobstore error: %v", err.Error())
-					}
-					userState.Comment = proto.String(string(buffer))
+					// TODO: Fix blobstore after embedded db is setup
+					//buffer, err := blobStore.Get(connectedClient.user.CommentBlob)
+					//if err != nil {
+					//	server.Panic(err)
+					//}
+					//userState.Comment = proto.String(string(buffer))
 				}
 			}
 		}
 
 		if connectedClient.Mute {
-			userstate.Mute = proto.Bool(true)
+			userState.Mute = proto.Bool(true)
 		}
 		if connectedClient.Suppress {
-			userstate.Suppress = proto.Bool(true)
+			userState.Suppress = proto.Bool(true)
 		}
 		if connectedClient.SelfMute {
-			userstate.SelfMute = proto.Bool(true)
+			userState.SelfMute = proto.Bool(true)
 		}
 		if connectedClient.SelfDeaf {
-			userstate.SelfDeaf = proto.Bool(true)
+			userState.SelfDeaf = proto.Bool(true)
 		}
 		if connectedClient.PrioritySpeaker {
-			userstate.PrioritySpeaker = proto.Bool(true)
+			userState.PrioritySpeaker = proto.Bool(true)
 		}
 		if connectedClient.Recording {
-			userstate.Recording = proto.Bool(true)
+			userState.Recording = proto.Bool(true)
 		}
+		// TODO:VALIDATE: Not empty
 		if connectedClient.PluginContext != nil || len(connectedClient.PluginContext) > 0 {
-			userstate.PluginContext = connectedClient.PluginContext
+			userState.PluginContext = connectedClient.PluginContext
 		}
 		if len(connectedClient.PluginIdentity) > 0 {
-			userstate.PluginIdentity = proto.String(connectedClient.PluginIdentity)
+			userState.PluginIdentity = proto.String(connectedClient.PluginIdentity)
 		}
 
 		err := client.sendMessage(userState)
@@ -882,18 +892,19 @@ func (server *Server) sendClientPermissions(client *Client, channel *Channel) {
 	}
 
 	// fixme(mkrautz): re-add when we have ACL caching
+	// TODO: Thats fine, but comment it out atleast
 	return
 
-	perm := acl.Permission(acl.NonePermission)
-	client.sendMessage(&mumbleproto.PermissionQuery{
-		ChannelID:   uint32(channel.ID),
-		Permissions: uint32(permission),
-	})
+	//permission := Permission(NonePermission)
+	//client.sendMessage(&mumbleproto.PermissionQuery{
+	//	ChannelID:   proto.Uint32(channel.ID),
+	//	Permissions: proto.Uint32(permission),
+	//})
 }
 
 type ClientPredicate func(client *Client) bool
 
-func (server *Server) broadcastProtoMessageWithPredicate(msg interface{}, clientcheck ClientPredicate) error {
+func (server *Server) broadcastProtoMessageWithPredicate(message interface{}, clientCheck ClientPredicate) error {
 	for _, client := range server.clients {
 		if !clientCheck(client) {
 			continue
@@ -901,7 +912,7 @@ func (server *Server) broadcastProtoMessageWithPredicate(msg interface{}, client
 		if client.state < StateClientAuthenticated {
 			continue
 		}
-		err := client.sendMessage(msg)
+		err := client.sendMessage(message)
 		if err != nil {
 			return err
 		}
@@ -910,53 +921,55 @@ func (server *Server) broadcastProtoMessageWithPredicate(msg interface{}, client
 	return nil
 }
 
-func (server *Server) broadcastProtoMessage(msg interface{}) (err error) {
-	err = server.broadcastProtoMessageWithPredicate(msg, func(client *Client) bool { return true })
+func (server *Server) broadcastProtoMessage(message interface{}) (err error) {
+	// TODO: Literally cant be right way to do this
+	err = server.broadcastProtoMessageWithPredicate(message, func(client *Client) bool { return true })
 	return
 }
 
-func (server *Server) handleIncomingMessage(client *Client, msg *Message) {
-	switch msg.kind {
+func (server *Server) handleIncomingMessage(client *Client, message *Message) {
+	// TODO: SHould do validation since message kind will be user input
+	switch message.kind {
 	case mumbleproto.MessageAuthenticate:
-		server.handleAuthenticate(msg.client, msg)
+		server.handleAuthenticate(message.client, message)
 	case mumbleproto.MessagePing:
-		server.handlePingMessage(msg.client, msg)
+		server.handlePingMessage(message.client, message)
 	case mumbleproto.MessageChannelRemove:
-		server.handleChannelRemoveMessage(msg.client, msg)
+		server.handleChannelRemoveMessage(message.client, message)
 	case mumbleproto.MessageChannelState:
-		server.handleChannelStateMessage(msg.client, msg)
+		server.handleChannelStateMessage(message.client, message)
 	case mumbleproto.MessageUserState:
-		server.handleUserStateMessage(msg.client, msg)
+		server.handleUserStateMessage(message.client, message)
 	case mumbleproto.MessageUserRemove:
-		server.handleUserRemoveMessage(msg.client, msg)
+		server.handleUserRemoveMessage(message.client, message)
 	case mumbleproto.MessageBanList:
-		server.handleBanListMessage(msg.client, msg)
+		server.handleBanListMessage(message.client, message)
 	case mumbleproto.MessageTextMessage:
-		server.handleTextMessage(msg.client, msg)
+		server.handleTextMessage(message.client, message)
 	case mumbleproto.MessageACL:
-		server.handleAclMessage(msg.client, msg)
+		server.handleAclMessage(message.client, message)
 	case mumbleproto.MessageQueryUsers:
-		server.handleQueryUsers(msg.client, msg)
+		server.handleQueryUsers(message.client, message)
 	case mumbleproto.MessageCryptSetup:
-		server.handleCryptSetup(msg.client, msg)
+		server.handleCryptSetup(message.client, message)
 	case mumbleproto.MessageContextAction:
-		server.Printf("MessageContextAction from client")
+		//server.Printf("MessageContextAction from client")
 	case mumbleproto.MessageUserList:
-		server.handleUserList(msg.client, msg)
+		server.handleUserList(message.client, message)
 	case mumbleproto.MessageVoiceTarget:
-		server.handleVoiceTarget(msg.client, msg)
+		server.handleVoiceTarget(message.client, message)
 	case mumbleproto.MessagePermissionQuery:
-		server.handlePermissionQuery(msg.client, msg)
+		server.handlePermissionQuery(message.client, message)
 	case mumbleproto.MessageUserStats:
-		server.handleUserStatsMessage(msg.client, msg)
+		server.handleUserStatsMessage(message.client, message)
 	case mumbleproto.MessageRequestBlob:
-		server.handleRequestBlob(msg.client, msg)
+		server.handleRequestBlob(message.client, message)
 	}
 }
 
 // Send the content of buffer as a UDP packet to addr.
-func (s *Server) SendUDP(buffer []byte, addr *net.UDPAddr) (err error) {
-	_, err = s.udpConnection.WriteTo(buffer, addr)
+func (server *Server) SendUDP(buffer []byte, addr *net.UDPAddr) (err error) {
+	_, err = server.udpConnection.WriteTo(buffer, addr)
 	return
 }
 
@@ -975,21 +988,22 @@ func (server *Server) udpListenLoop() {
 			}
 		}
 
-		udpAddr, ok := remote.(*net.UDPAddr)
-		if !ok {
-			server.Printf("No UDPAddr in read packet. Disabling UDP. (Windows? Please don't use that..., really its 2017...)")
+		udpAddr, success := remote.(*net.UDPAddr)
+		if !success {
+			//server.Printf("No UDPAddr in read packet. Disabling UDP. (Windows? Please don't use that..., really its 2017...)")
 			return
 		}
 
 		// Length 12 is for ping datagrams from the ConnectDialog.
 		if nRead == 12 {
 			readBuffer := bytes.NewBuffer(buffer)
+			// TODO: No, use structs, not inline local variables in 500 line functions, fuck me i should have wrote this from scratch
 			var (
 				tmp32 uint32
 				rand  uint64
 			)
-			_ = binary.Read(readbuf, binary.BigEndian, &tmp32)
-			_ = binary.Read(readbuf, binary.BigEndian, &rand)
+			_ = binary.Read(readBuffer, binary.BigEndian, &tmp32)
+			_ = binary.Read(readBuffer, binary.BigEndian, &rand)
 
 			buffer := bytes.NewBuffer(make([]byte, 0, 24))
 			_ = binary.Write(buffer, binary.BigEndian, uint32((1<<16)|(2<<8)|2))
@@ -998,13 +1012,14 @@ func (server *Server) udpListenLoop() {
 			_ = binary.Write(buffer, binary.BigEndian, server.config.MaxUsers)
 			_ = binary.Write(buffer, binary.BigEndian, server.config.MaxBandwidth)
 
+			// TODO: wait wait, why are we using buffer, I thought we created readBuffer, whats the point fo that variable?
 			err = server.SendUDP(buffer.Bytes(), udpAddr)
 			if err != nil {
 				return
 			}
 
 		} else {
-			server.handleUdpPacket(udpAddr, buf[0:nRead])
+			server.handleUDPPacket(udpAddr, buffer[0:nRead])
 		}
 	}
 }
@@ -1021,22 +1036,22 @@ func (server *Server) handleUDPPacket(udpAddr *net.UDPAddr, buffer []byte) {
 	// which maps a host address to a slice of clients.
 	server.hostMutex.Lock()
 	defer server.hostMutex.Unlock()
-	client, ok := server.hpclients[udpAddr.String()]
-	if ok {
+	client, success := server.hostnameClients[udpAddr.String()]
+	if success {
 		err := client.crypt.Decrypt(plain, buffer)
 		if err != nil {
-			client.Debugf("unable to decrypt incoming packet, requesting resync: %v", err)
+			//client.Debugf("unable to decrypt incoming packet, requesting resync: %v", err)
 			client.cryptResync()
 			return
 		}
 		match = client
 	} else {
-		host := udpaddr.IP.String()
-		hostclients := server.hostClients[host]
+		host := udpAddr.IP.String()
+		hostClients := server.hostClients[host]
 		for _, client := range hostClients {
 			err := client.crypt.Decrypt(plain[0:], buffer)
 			if err != nil {
-				client.Debugf("unable to decrypt incoming packet, requesting resync: %v", err)
+				//client.Debugf("unable to decrypt incoming packet, requesting resync: %v", err)
 				client.cryptResync()
 				return
 			} else {
@@ -1085,11 +1100,14 @@ func (server *Server) userEnterChannel(client *Client, channel *Channel, userSta
 
 	server.ClearCaches()
 
-	server.UpdateFrozenUserLastChannel(client)
+	// TODO: Fix after changing freezing to writing
+	//server.UpdateFrozenUserLastChannel(client)
 
-	canSpeak := acl.HasPermission(&channel.ACL, client, acl.SpeakPermission)
-	if canspeak == client.Suppress {
-		client.Suppress != canSpeak
+	// TODO: Update HasPermission shit
+	//canSpeak := acl.HasPermission(&channel.ACL, client, acl.SpeakPermission)
+	canSpeak := false
+	if canSpeak == client.Suppress {
+		client.Suppress = canSpeak
 		userState.Suppress = proto.Bool(client.Suppress)
 	}
 
@@ -1103,13 +1121,14 @@ func (server *Server) userEnterChannel(client *Client, channel *Channel, userSta
 // TODO: But every other local variable is server not s
 func (server *Server) RegisterClient(client *Client) (uid uint32, err error) {
 	// Increment nextUserId only if registration succeeded.
+	// TODO: Don't think this is right. Obs should be done within the NewUser function and not randomly in the god damn server file
 	defer func() {
 		if err == nil {
-			server.nextUserId += 1
+			server.nextUserID += 1
 		}
 	}()
 
-	user, err := NewUser(server.nextUserId, client.Username)
+	user, err := NewUser(server.nextUserID, client.Username)
 	if err != nil {
 		return 0, err
 	}
@@ -1117,15 +1136,15 @@ func (server *Server) RegisterClient(client *Client) (uid uint32, err error) {
 	// Grumble can only register users with certificates.
 	// TODO: Use ephemeral keypairs to make a better more secure system that supports guests that can upgrade their account into full registered accounts
 	if client.HasCertificate() {
-		return 0, errors.New("no cert hash")
+		return 0, errors.New("Client Error: No certificate hash")
 	}
 
 	user.Email = client.Email
 	user.CertificateHash = client.CertificateHash()
 
-	uid = server.nextUserId
+	uid = server.nextUserID
 	server.Users[uid] = user
-	server.UserCertMap[client.CertificateHash()] = user
+	server.UserCertificateMap[client.CertificateHash()] = user
 	server.UserNameMap[client.Username] = user
 
 	return uid, nil
@@ -1133,9 +1152,9 @@ func (server *Server) RegisterClient(client *Client) (uid uint32, err error) {
 
 // Remove a registered user.
 func (server *Server) RemoveRegistration(uid uint32) (err error) {
-	user, ok := server.Users[uid]
+	user, success := server.Users[uid]
 	// TODO: No, don't ok, use error then return that fucking error, fucks sake
-	if !ok {
+	if !success {
 		return errors.New("Unknown user ID")
 	}
 
@@ -1152,23 +1171,24 @@ func (server *Server) RemoveRegistration(uid uint32) (err error) {
 
 // Remove references for user id uid from channel. Traverses childChannels.
 func (server *Server) removeRegisteredUserFromChannel(uid uint32, channel *Channel) {
-	newACL := []acl{}
+	newACLs := []acl{}
 	for _, channelACL := range channel.ACLs {
-		if channelACL.UserId == uid {
+		if channelACL.UserID == uid {
 			continue
 		}
-		newACL = append(newACL, channelACL)
+		// TODO: LOL why is this just not set to channel.ACLs? Im so confused
+		newACLs = append(newACLs, channelACL)
 	}
-	channel.ACLs = newACL
+	channel.ACLs = newACLs
 
 	for _, group := range channel.ACL.Groups {
-		if _, ok := group.Add[uid]; ok {
+		if _, success := group.Add[uid]; success {
 			delete(group.Add, uid)
 		}
-		if _, ok := group.Remove[uid]; ok {
+		if _, success := group.Remove[uid]; success {
 			delete(group.Remove, uid)
 		}
-		if _, ok := group.Temporary[uid]; ok {
+		if _, success := group.Temporary[uid]; success {
 			delete(group.Temporary, uid)
 		}
 	}
@@ -1182,6 +1202,7 @@ func (server *Server) removeRegisteredUserFromChannel(uid uint32, channel *Chann
 func (server *Server) RemoveChannel(channel *Channel) {
 	// Can't remove root
 	// TODO: Move this to a fucntion that cna be called as a validation, all validations should be their own funcitons to make testing easier
+	// why not just have a root channel bool? if theres only 1 or make it static ID
 	if channel == server.RootChannel() {
 		return
 	}
@@ -1193,23 +1214,24 @@ func (server *Server) RemoveChannel(channel *Channel) {
 
 	// TODO: SubChannel or child, lets not mix metaphors!!
 	// Remove all subchannels // TODO: No remove all children, you are iterating over the children not subhcannels
-	for _, child := range channel.children {
-		server.RemoveChannel(child)
+	for _, childChannel := range channel.children {
+		server.RemoveChannel(childChannel)
 	}
 
 	// Remove all clients
 	for _, client := range channel.clients {
 		target := channel.parent
-		for target.parent != nil && !acl.HasPermission(&target.ACL, client, acl.EnterPermission) {
-			target = target.parent
-		}
+		// TODO: Update after fixing HasPermission
+		//for target.parent != nil && !acl.HasPermission(&target.ACL, client, acl.EnterPermission) {
+		//	target = target.parent
+		//}
 
 		userState := &mumbleproto.UserState{}
 		userState.Session = client.Session()
 		userState.ChannelID = target.ID
 		server.userEnterChannel(client, target, userState)
 		if err := server.broadcastProtoMessage(userState); err != nil {
-			server.Panicf("%v", err)
+			server.Panic(err)
 		}
 	}
 
@@ -1221,7 +1243,7 @@ func (server *Server) RemoveChannel(channel *Channel) {
 		ChannelID: channel.ID,
 	}
 	if err := server.broadcastProtoMessage(channelRemove); err != nil {
-		server.Panicf("%v", err)
+		server.Panic(err)
 	}
 }
 
@@ -1310,10 +1332,10 @@ func (server *Server) acceptLoop() {
 
 		// Is the client IP-banned?
 		if server.IsConnectionBanned(connection) {
-			server.Printf("Rejected client %v: Banned", connection.RemoteAddr())
+			//server.Printf("Rejected client %v: Banned", connection.RemoteAddr())
 			err := connection.Close()
 			if err != nil {
-				server.Printf("Unable to close connection: %v", err)
+				//server.Printf("Unable to close connection: %v", err)
 			}
 			continue
 		}
@@ -1322,7 +1344,7 @@ func (server *Server) acceptLoop() {
 		// which wraps net.TCPConn.
 		err = server.handleIncomingClient(connection)
 		if err != nil {
-			server.Printf("Unable to handle new client: %v", err)
+			//server.Printf("Unable to handle new client: %v", err)
 			continue
 		}
 	}
@@ -1451,8 +1473,8 @@ func (server *Server) Start() (err error) {
 	}
 	server.tlsListener = tls.NewListener(server.tcpListener, server.tlsConfig)
 
-	server.Printf("Started: listening on %v", server.tcpListener.Addr())
-	server.running = true // TODO: Something feels really wwierd about this, considering other things are used to check this
+	//server.Printf("Started: listening on %v", server.tcpListener.Addr())
+	server.isRunning = true // TODO: Something feels really wwierd about this, considering other things are used to check this
 
 	// Open a fresh freezer log
 	// TODO: Ugghhh why have a separate log file? I dont get it!
@@ -1539,7 +1561,7 @@ func (self *Server) Stop() (err error) {
 	// TODO: Seriously this isn't even confirmed to be true! HOW DO YOU KNOW ITS NOT RUNNING? YOU DIDNT CHECK ANYTHING LOL. if you dont need to check anything? Why eevn set it? something else is giving you this information. exrapolate and save mmemory
 	server.isRunning = false
 	// TODO: Pop this into a consistent single log file, with the ability to add a flag arg to print to screen, idaelly we are making a daemonized server in almost all cases though, so remember that should be the default functionality of a server. almost never in production are we ever running a server not in a daemonized way, so printing to the console should be debug functionality
-	server.Printf("Stopped")
+	//server.Printf("Stopped")
 
 	return nil
 }

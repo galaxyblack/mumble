@@ -16,14 +16,14 @@ type Ban struct {
 	CertificateHash string
 	Reason          string
 	Start           int64
-	Duration        uint32
+	Duration        int64
 }
 
 // Create a net.IPMask from a specified amount of mask bits
 func (ban Ban) IPMask() (mask net.IPMask) {
-	allbits := ban.Mask
+	allBits := ban.Mask
 	for i := 0; i < 16; i++ {
-		bits := allbits
+		bits := allBits
 		if bits > 0 {
 			if bits > 8 {
 				bits = 8
@@ -32,7 +32,7 @@ func (ban Ban) IPMask() (mask net.IPMask) {
 		} else {
 			mask = append(mask, byte(0))
 		}
-		allbits -= 8
+		allBits -= 8
 	}
 	return
 }
@@ -69,7 +69,7 @@ func (ban Ban) IsExpired() bool {
 	}
 
 	// Expiry check
-	expiryTime := ban.Start + int64(ban.Duration)
+	expiryTime := ban.Start + ban.Duration
 	if time.Now().Unix() > expiryTime {
 		return true
 	}
