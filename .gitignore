@@ -1,4 +1,4 @@
-cmd/grumble/grumble
+cmd/mumbled/mumbled
 .DS_Store
 *.[568ao]
 *.ao
@@ -28,3 +28,6 @@ src/github.com
 src/golang.org
 bin/
 pkg/
+*.swp
+*.swo
+
