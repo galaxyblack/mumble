@@ -11,6 +11,16 @@ import (
 	"mumble/protocol"
 )
 
+// TODO:LIST
+// 1) Switch out the Flags/CLI framework to simplify the command-line and add feature improvements
+// 2) Switch out the builtin logging system implemented across several files/objects for a community built centralized logging solution
+// 3) Switch out the file based and map system configuration system in favor of an embedded DB solution like BoltDB (will remove 40% of the code base, and simplify development/debugging)
+// 4) Using the new systems convert the configuration system to using the embedded DB
+// 5) Rebuild the server, client, acl and other objects using the embedded KV DB
+// 6) Upgrade the SHA1 password hashing system for at least SHA256, better would be adding OTP, keypair based guest system with later registration
+
+// At that point it should be ready for 0.1.0 alpha release
+
 type args struct {
 	ShowHelp      bool
 	DataDirectory string
