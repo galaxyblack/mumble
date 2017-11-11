@@ -65,6 +65,7 @@ var (
 )
 
 // TODO: These two functions likely belong in a common or config package/module/file
+// or put in as default from the config.go file during initialization, later overwritten by ENV variables or cmd config
 func defaultDataDirectory() string {
 	// TODO: This is actually no longer the preferred location
 	// it should be in .local/config/mumble
@@ -95,6 +96,7 @@ func Usage() {
 }
 
 func init() {
+	// TODO: switch to using a cli library, the flag library isn't bad but we could simplify a lot by just using a popular comminty implemention
 	flag.Usage = Usage
 
 	flag.BoolVar(&Args.ShowHelp, "help", false, "")
@@ -115,7 +117,7 @@ func main() {
 		return
 	}
 
-	// Open the data dir to check whether it exists.
+	// If the defined dataDirectory does not exist? Make it
 	if _, err := os.Stat(Args.DataDirectory); os.IsNotExist(err) {
 		os.Mkdir(Args.DataDirectory, 600)
 	}
@@ -130,7 +132,7 @@ func main() {
 	dataDirectory.Close()
 
 	// Set up logging
-	// TODO: No thanks, lets just use a lib
+	// TODO: No thanks, lets just use a lib, its not terrible but it could be much better
 	//err = logTarget.Target.OpenFile(Args.LogPath)
 	//if err != nil {
 	//	fmt.Fprintf(os.Stderr, "Unable to open log file: %v", err)
@@ -154,6 +156,7 @@ func main() {
 	// These are used as the default certificate of all virtual servers
 	// and the SSH admin console, but can be overridden using the "key"
 	// and "cert" arguments to Grumble.
+	// TODO: Move this into a certificate.go file, no need to implement that in the command-line file.
 	certificateFilename := filepath.Join(Args.DataDirectory, "cert.pem")
 	keyFilename := filepath.Join(Args.DataDirectory, "key.pem")
 	shouldRegen := false
