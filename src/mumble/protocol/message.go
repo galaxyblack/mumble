@@ -125,14 +125,16 @@ func (server *Server) handleChannelRemoveMessage(client *Client, message *Messag
 		return
 	}
 
+	// TODO: This is a fucking validation
 	if channelRemove.ChannelID == nil {
 		return
 	}
 
-	channel, exists := server.Channels[*channelRemove.ChannelID]
-	if !exists {
-		return
-	}
+	// TODO: Just use a god damn embedded db, till then fuck it
+	//channel, exists := server.Channels[channelRemove.ChannelID]
+	//if !exists {
+	//	return
+	//}
 
 	//if *(&channel.ACL.HasPermission(client.Context, client, WritePermission)) {
 	//	client.sendPermissionDenied(client, channel, WritePermission)
@@ -144,7 +146,8 @@ func (server *Server) handleChannelRemoveMessage(client *Client, message *Messag
 	//	server.DeleteFrozenChannel(channel)
 	//}
 
-	server.RemoveChannel(channel)
+	// TODO: This should remove channel by ID not channel object, thats just dumb
+	//server.RemoveChannel(channel)
 }
 
 // Handle channel state change.
@@ -160,25 +163,27 @@ func (server *Server) handleChannelStateMessage(client *Client, message *Message
 	var channel *Channel
 	var parent *Channel
 	// TODO: Don't use ok use error
-	var ok bool
+	//var ok bool
 
 	// Lookup channel for channel ID
 	if channelState.ChannelID != nil {
-		channel, success := server.Channels[*channelState.ChannelID]
-		if success {
-			client.Panic(errors.New("Invalid channel specified in ChannelState message"))
-			return
-		}
+		// TODO: Fix this later when DB exists
+		//channel, success := server.Channels[*channelState.ChannelID]
+		//if success {
+		//	client.Panic(errors.New("Invalid channel specified in ChannelState message"))
+		//	return
+		//}
 	}
 
 	// Lookup parent
 	if channelState.Parent != nil {
-		parent, success := server.Channels[*channelState.Parent]
+		// TODO fix this later when DB exists
+		//parent, success := server.Channels[*channelState.Parent]
 		// TODO: Ok should be err, and provide the fucking string, god damn
-		if success {
-			client.Panic(errors.New("Invalid parent channel specified in ChannelState message"))
-			return
-		}
+		//if success {
+		//	client.Panic(errors.New("Invalid parent channel specified in ChannelState message"))
+		//	return
+		//}
 	}
 
 	// The server can't receive links through the links field in the ChannelState message,
@@ -268,7 +273,7 @@ func (server *Server) handleChannelStateMessage(client *Client, message *Message
 			// TODO: This relies on a blob store existing, and really should just get rid of this code and use a library that maintained instead of reinventing the wheel
 			//key, err = BlobStorePut([]byte(description))
 			if err != nil {
-				server.Panicf("Blobstore error: %v", err)
+				server.Panic(err)
 			}
 		}
 
@@ -529,7 +534,7 @@ func (server *Server) handleUserRemoveMessage(removedClient *Client, message *Me
 	//	permissionDenied = acl.Permission(acl.BanPermission)
 	//}
 	// TODO: haspermission needs revamping
-	RootChannel := server.RootChannel()
+	//RootChannel := server.RootChannel()
 	//if removedClient.IsSuperUser() || !acl.HasPermission(&rootChannel.ACL, removedClient, permissionDenied) {
 	//	client.sendPermissionDenied(client, rootChannel, permissionDenied)
 	//	return
@@ -701,16 +706,17 @@ func (server *Server) handleUserStateMessage(client *Client, message *Message) {
 		}
 	}
 
+	// TODO: Fix after
 	// Registration
 	if userState.UserID != nil {
 		// If user == actor, check for SelfRegisterPermission on root channel.
 		// If user != actor, check for RegisterPermission permission on root channel.
-		registeredPermission := Permission(RegisterPermission)
-		if actor == target {
-			registeredPermission = Permission(SelfRegisterPermission)
-		}
+		//registeredPermission := Permission(RegisterPermission)
+		//if actor == target {
+		//	registeredPermission = Permission(SelfRegisterPermission)
+		//}
 
-		rootChannel := server.RootChannel()
+		//rootChannel := server.RootChannel()
 		// TODO: Fix HasPermission
 		//if target.IsRegistered() || !&rootChannel.ACL.HasPermission(actor, registeredPermission) {
 		//	client.sendPermissionDenied(actor, rootChannel, registeredPermission)
@@ -945,7 +951,7 @@ func (server *Server) handleBanListMessage(client *Client, message *Message) {
 		return
 	}
 
-	rootChannel := server.RootChannel()
+	//rootChannel := server.RootChannel()
 	// TODO: Fix HasPermission
 	//if !&rootChannel.ACL.HasPermission(client, BanPermission) {
 	//	client.sendPermissionDenied(client, rootChannel, BanPermission)
@@ -955,53 +961,55 @@ func (server *Server) handleBanListMessage(client *Client, message *Message) {
 	if banList.Query != nil && *banList.Query != false {
 		banList.Reset()
 
-		server.banLock.RLock()
-		defer server.banLock.RUnlock()
+		// TODO: Ughh fuck all this for now
+		//server.banLock.RLock()
+		//defer server.banLock.RUnlock()
 
-		for _, ban := range server.Bans {
-			entry := &mumbleproto.BanList_BanEntry{}
-			entry.Address = ban.IP
-			entry.Mask = proto.Uint32(uint32(ban.Mask))
-			entry.Name = proto.String(ban.Username)
-			entry.Hash = proto.String(ban.CertificateHash)
-			entry.Reason = proto.String(ban.Reason)
-			entry.Start = proto.String(ban.ISOStartDate())
-			// TODO: We may lose duration precision by converting it Uint32 from Uint64
-			//entry.Duration = proto.Uint64(ban.Duration)
-			entry.Duration = proto.Uint32(uint32(ban.Duration))
-			banList.Bans = append(banList.Bans, entry)
-		}
-		if err := client.sendMessage(banList); err != nil {
-			client.Panic(errors.New("Unable to send BanList"))
-		}
+		//for _, ban := range server.Bans {
+		//	entry := &mumbleproto.BanList_BanEntry{}
+		//	entry.Address = ban.IPAddress
+		//	entry.Mask = proto.Uint32(ban.Mask)
+		//	entry.Name = proto.String(ban.Username)
+		//	entry.Hash = proto.String(ban.CertificateHash)
+		//	entry.Reason = proto.String(ban.Reason)
+		//	entry.Start = proto.String(ban.ISOStartDate())
+		//	// TODO: We may lose duration precision by converting it Uint32 from Uint64
+		//	//entry.Duration = proto.Uint64(ban.Duration)
+		//	entry.Duration = proto.Int32(ban.Duration)
+		//	banList.Bans = append(banList.Bans, entry)
+		//}
+		//if err := client.sendMessage(banList); err != nil {
+		//	client.Panic(errors.New("Unable to send BanList"))
+		//}
 	} else {
-		server.banLock.Lock()
-		defer server.banLock.Unlock()
+		// TODO: Seriously fuck this for now, do it better with boltDB
+		//server.banLock.Lock()
+		//defer server.banLock.Unlock()
 
-		server.Bans = server.Bans[0:0]
-		for _, entry := range banList.Bans {
-			ban := Ban{}
-			ban.IP = entry.Address
-			ban.Mask = int(*entry.Mask)
-			if entry.Name != nil {
-				ban.Username = *entry.Name
-			}
-			if entry.Hash != nil {
-				ban.CertificateHash = *entry.Hash
-			}
-			if entry.Reason != nil {
-				ban.Reason = *entry.Reason
-			}
-			if entry.Start != nil {
-				ban.SetISOStartDate(*entry.Start)
-			}
-			// TODO: Duration needs another look, it shuld be uint64 for good precision but stay backwards compatible with murmur
-			if entry.Duration != nil {
-				// TODO: This conversion from 32 wont probably work
-				ban.Duration = int64(*entry.Duration)
-			}
-			server.Bans = append(server.Bans, ban)
-		}
+		//server.Bans = server.Bans[0:0]
+		//for _, banEntry := range banList.Bans {
+		//	ban := Ban{}
+		//	ban.IPAddress = banEntry.Address
+		//	ban.Mask = banEntry.Mask
+		//	if banEntry.Name != nil {
+		//		ban.Username = banEntry.Name
+		//	}
+		//	if banEntry.Hash != nil {
+		//		ban.CertificateHash = banEntry.Hash
+		//	}
+		//	if banEntry.Reason != nil {
+		//		ban.Reason = banEntry.Reason
+		//	}
+		//	if banEntry.Start != nil {
+		//		ban.SetISOStartDate(banEntry.Start)
+		//	}
+		//	// TODO: Duration needs another look, it shuld be uint64 for good precision but stay backwards compatible with murmur
+		//	if banEntry.Duration != nil {
+		//		// TODO: This conversion from 32 wont probably work
+		//		ban.Duration = banEntry.Duration
+		//	}
+		//	server.Bans = append(server.Bans, ban)
+		//}
 
 		// TODO: Remove frozen bans
 		//server.UpdateFrozenBans(server.Bans)
@@ -1115,8 +1123,8 @@ func (server *Server) handleAclMessage(client *Client, message *Message) {
 	reply := &mumbleproto.ACL{}
 	reply.ChannelID = &channel.ID
 
-	channels := []*Channel{}
-	users := map[int]bool{}
+	//channels := []*Channel{}
+	//users := map[int]bool{}
 
 	// TODO: Ughh just comment all this bullshit out until I can fix the structure shit
 	// Query the current ACL state for the channel
@@ -1394,7 +1402,7 @@ func (server *Server) handleUserStatsMessage(client *Client, message *Message) {
 	extended := (client == target)
 	// Otherwise, only send extended UserStats for people with +register permissions
 	// on the root channel.
-	rootChannel := server.RootChannel()
+	//rootChannel := server.RootChannel()
 	// TODO: Another if not needed. It adds up, its a message function!
 	//extended = acl.HasPermission(&rootChannel.ACL, client, acl.RegisterPermission)
 
@@ -1566,7 +1574,7 @@ func (server *Server) handleRequestBlob(client *Client, message *Message) {
 		return
 	}
 
-	userState := &mumbleproto.UserState{}
+	//userState := &mumbleproto.UserState{}
 
 	// Request for user textures
 	// TODO: Why count if you only want to know 1 count?
@@ -1613,7 +1621,7 @@ func (server *Server) handleRequestBlob(client *Client, message *Message) {
 					//buffer, err := requestBlob.Get(target.user.CommentBlob)
 					//if err != nil {
 					//	// TODO: There is no reason to repeat these fucntions for each class, its just bad
-					//	server.Panicf("Blobstore error: %v", err)
+					//	server.Panic(err)
 					//	return
 					//}
 					//userState.Reset()
@@ -1666,7 +1674,7 @@ func (server *Server) handleUserList(client *Client, message *Message) {
 	}
 
 	// Only users who are allowed to register other users can access the user list.
-	rootChannel := server.RootChannel()
+	//rootChannel := server.RootChannel()
 	// TODO: HasPermission needs updating
 	//if !&rootChannel.ACL.HasPermission(client, RegisterPermission) {
 	//	client.sendPermissionDenied(client, rootChannel, RegisterPermission)
@@ -1694,42 +1702,43 @@ func (server *Server) handleUserList(client *Client, message *Message) {
 		}
 		// Rename, registration removal
 	} else {
-		// TODO: STOP COUNTING OVER what youw ant to check!
+		// TODO: STOP COUNTING OVER what youw ant to check! you are just checking if empty!
 		if len(userList.Users) > 0 {
-			tx := server.freezeLog.BeginTx()
-			for _, listUser := range userList.Users {
-				uid := *listUser.UserID
-				// TODO: Repeated validation, make a function!
-				if uid == 0 {
-					continue
-				}
-				user, ok := server.Users[uid]
-				// TODO NOT OK, ERR! This is useless to everyone
-				if ok {
-					// TODO: Then validation? serious?
-					if listUser.Name == nil {
-						// De-register
-						server.RemoveRegistration(uid)
-						//err := tx.Put(&freezer.UserRemove{ID: listUser.UserID})
-						// TODO: If you made this a function you could reduce maybe 100 lines per file
-						//if err != nil {
-						//	server.Fatal(err)
-						//}
-					} else {
-						// Rename user
-						// todo(mkrautz): Validate name.
-						user.Name = *listUser.Name
-						//err := tx.Put(&freezer.User{ID: listUser.UserID, Name: listUser.Name})
-						//if err != nil {
-						//	server.Fatal(err)
-						//}
-					}
-				}
-			}
-			err := tx.Commit()
-			if err != nil {
-				server.Fatal(err)
-			}
+			// TODO Just rebuild this after embeddedDB
+			//tx := server.freezeLog.BeginTx()
+			//for _, listUser := range userList.Users {
+			//	uid := *listUser.UserID
+			//	// TODO: Repeated validation, make a function!
+			//	if uid == 0 {
+			//		continue
+			//	}
+			//	user, ok := server.Users[uid]
+			//	// TODO NOT OK, ERR! This is useless to everyone
+			//	if ok {
+			//		// TODO: Then validation? serious?
+			//		if listUser.Name == nil {
+			//			// De-register
+			//			server.RemoveRegistration(uid)
+			//			//err := tx.Put(&freezer.UserRemove{ID: listUser.UserID})
+			//			// TODO: If you made this a function you could reduce maybe 100 lines per file
+			//			//if err != nil {
+			//			//	server.Fatal(err)
+			//			//}
+			//		} else {
+			//			// Rename user
+			//			// todo(mkrautz): Validate name.
+			//			user.Name = *listUser.Name
+			//			//err := tx.Put(&freezer.User{ID: listUser.UserID, Name: listUser.Name})
+			//			//if err != nil {
+			//			//	server.Fatal(err)
+			//			//}
+			//		}
+			//	}
+			//}
+			//err := tx.Commit()
+			//if err != nil {
+			//	server.Panic(err)
+			//}
 		}
 	}
 }

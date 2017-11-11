@@ -95,7 +95,8 @@ func (server *Server) RegisterPublicServer() {
 	buffer := bytes.NewBuffer(nil)
 	err := xml.NewEncoder(buffer).Encode(registrationData)
 	if err != nil {
-		server.Printf("register: unable to marshal xml: %v", err)
+		// TODO: Centralized logging!!!!!!!!!
+		//server.Printf("register: unable to marshal xml: %v", err)
 		return
 	}
 
@@ -107,19 +108,24 @@ func (server *Server) RegisterPublicServer() {
 		client := &http.Client{Transport: transport}
 		result, err := client.Post(registerURL, "text/xml", ioutil.NopCloser(buffer))
 		if err != nil {
-			server.Printf("register: unable to post registration request: %v", err)
+			// TODO: Centralized logging!!!!!!!!!
+			//server.Printf("register: unable to post registration request: %v", err)
 			return
 		}
-		bodyBytes, err := ioutil.ReadAll(result.Body)
+		//bodyBytes, err := ioutil.ReadAll(result.Body)
 		if err == nil {
-			registerMessage := string(bodyBytes)
+			// TODO Not using registerMessage till db is added
+			//registerMessage := string(bodyBytes)
 			if result.StatusCode == 200 {
-				server.Printf("register: %v", registerMessage)
+				// TODO: Centralized logging!!!!!!!!!
+				//server.Printf("register: %v", registerMessage)
 			} else {
-				server.Printf("register: (status %v) %v", result.StatusCode, registerMessage)
+				// TODO: Centralized logging!!!!!!!!!
+				//server.Printf("register: (status %v) %v", result.StatusCode, registerMessage)
 			}
 		} else {
-			server.Printf("register: unable to read post response: %v", err)
+			// TODO: Centralized logging!!!!!!!!!
+			//server.Printf("register: unable to read post response: %v", err)
 			return
 		}
 	}()

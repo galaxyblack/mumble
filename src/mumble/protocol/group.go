@@ -118,28 +118,28 @@ func (group *Group) MembersInContext(context *Context) (members []uint32) {
 	// Walk a group's context chain, starting with the context the group
 	// is defined on, followed by its parent contexts.
 	// TODO: Whats the point of just recreating the same variable? Just wastes resources
-	originalContext := context
+	//originalContext := context
 	// TODO: This is a validation, needs own function
 	for context != nil {
-		currentGroup, ok := context.Groups[group.Name]
+		//currentGroup, ok := context.Groups[group.Name]
 		// TODO: ok is useless for debugging and everyone who sues the server app
-		if ok {
-			// If the group is not inheritable, and we're looking at an
-			// ancestor group, we've looked in all the groups we should.
-			// TODO: Doesn't work can't use *Context against bool
-			//if context != originalContext && !currentGroup.Inheritable {
-			//	break
-			//}
-			// TODO: Find the current group and add it to the groups? What the fuck are we doing?
+		//if ok {
+		// If the group is not inheritable, and we're looking at an
+		// ancestor group, we've looked in all the groups we should.
+		// TODO: Doesn't work can't use *Context against bool
+		//if context != originalContext && !currentGroup.Inheritable {
+		//	break
+		//}
+		// TODO: Find the current group and add it to the groups? What the fuck are we doing?
 
-			// Add the group to the list of groups to be considered
-			// If this group does not inherit from groups in its ancestors, stop looking
-			// for more ancestor groups.
-			// Comparing a *Context with bool, wont work
-			//if !currentGroup.Inherit {
-			//	break
-			//}
-		}
+		// Add the group to the list of groups to be considered
+		// If this group does not inherit from groups in its ancestors, stop looking
+		// for more ancestor groups.
+		// Comparing a *Context with bool, wont work
+		//if !currentGroup.Inherit {
+		//	break
+		//}
+		//}
 		// and why?
 		context = context.Parent
 	}
@@ -280,23 +280,23 @@ func GroupMemberCheck(current *Context, acl *Context, name string, user User) (o
 		// TODO: Validate channel
 		for channel != nil {
 			// TODO: Use err not ok its useless!
-			if group, ok := channel.Groups[name]; ok {
-				// Skip non-inheritable groups if we're in parents
-				// of our evaluated context.
-				// TODO: Can't compare different data types, bool vs *COntent
-				//if !group.Inheritable {
-				//	break
-				//}
-				// Prepend group
-				// TODO: Why?
-				//groups = append([]Group{group}, groups...)
-				// If this group does not inherit from groups in its ancestors, stop looking
-				// for more ancestor groups.
-				// This entire program could be cut in half by just using a proper embedded DB instead of trying to reimplemnt one
-				//if !group.Inherit {
-				//	break
-				//}
-			}
+			//if group, ok := channel.Groups[name]; ok {
+			// Skip non-inheritable groups if we're in parents
+			// of our evaluated context.
+			// TODO: Can't compare different data types, bool vs *COntent
+			//if !group.Inheritable {
+			//	break
+			//}
+			// Prepend group
+			// TODO: Why?
+			//groups = append([]Group{group}, groups...)
+			// If this group does not inherit from groups in its ancestors, stop looking
+			// for more ancestor groups.
+			// This entire program could be cut in half by just using a proper embedded DB instead of trying to reimplemnt one
+			//if !group.Inherit {
+			//	break
+			//}
+			//}
 			// TODO: Validate parent exists!
 			channel = channel.Parent
 		}
@@ -325,8 +325,8 @@ func GroupMemberCheck(current *Context, acl *Context, name string, user User) (o
 // group inheritance.
 func (context *Context) GroupNames() []string {
 	names := map[string]bool{}
-	originalContext := context
-	contexts := []*Context{}
+	//originalContext := context
+	//contexts := []*Context{}
 
 	// Walk through the whole context chain and all groups in it.
 	// TODO: No just use a proper DB and simplify!

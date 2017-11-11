@@ -42,6 +42,16 @@ type BlobStore struct {
 	directory string
 }
 
+func CreateBlobStore(path string) BlobStore {
+	blobDirectory := filepath.Join(path, "blob")
+	err := os.Mkdir(blobDirectory, 0700)
+	if err != nil && !os.IsExist(err) {
+		//log.Fatalf("Unable to create blob directory: %v", err)
+	}
+	return Open(blobDirectory)
+
+}
+
 // Open opens an existing BlobStore. The path parameter must
 // point to a directory that already exists for correct
 // operation, however, the Open function does not check that

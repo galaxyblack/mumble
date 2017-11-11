@@ -57,7 +57,8 @@ func MurmurImport(filename string) (err error) {
 	log.Printf("Found servers: %v (%v servers)", serverIDs, len(serverIDs))
 
 	for _, sid := range serverIDs {
-		m, err := NewServerFromSQLite(sid, db)
+		// TODO: M was declared but now is _ because of commenting out bad code
+		_, err := NewServerFromSQLite(sid, db)
 		if err != nil {
 			return err
 		}
@@ -82,47 +83,47 @@ func MurmurImport(filename string) (err error) {
 }
 
 // Create a new Server from a Murmur SQLite database
-func NewServerFromSQLite(id uint32, db *sql.DB) (server *Server, err error) {
+func NewServerFromSQLite(id uint32, db *sql.DB) (server Server, err error) {
 	server, err = NewServer(id)
 	if err != nil {
-		return nil, err
+		return Server{}, err
 	}
 
 	// TODO: If you pass server, there should ZERO reason to pass a specific attribute of the server afterwards
-	err = populateChannelInfoFromDatabase(server, server.RootChannel(), db)
-	if err != nil {
-		return nil, err
-	}
+	//err = populateChannelInfoFromDatabase(server, server.RootChannel(), db)
+	//if err != nil {
+	//	return Server{}, err
+	//}
 
-	err = populateChannelACLFromDatabase(server, server.RootChannel(), db)
-	if err != nil {
-		return nil, err
-	}
+	//err = populateChannelACLFromDatabase(server, server.RootChannel(), db)
+	//if err != nil {
+	//	return Server{}, err
+	//}
 
-	err = populateChannelGroupsFromDatabase(server, server.RootChannel(), db)
-	if err != nil {
-		return nil, err
-	}
+	//err = populateChannelGroupsFromDatabase(server, server.RootChannel(), db)
+	//if err != nil {
+	//	return Server{}, err
+	//}
 
-	err = populateChannelsFromDatabase(server, db, 0)
-	if err != nil {
-		return nil, err
-	}
+	//err = populateChannelsFromDatabase(server, db, 0)
+	//if err != nil {
+	//	return Server{}, err
+	//}
 
-	err = populateChannelLinkInfo(server, db)
-	if err != nil {
-		return nil, err
-	}
+	//err = populateChannelLinkInfo(server, db)
+	//if err != nil {
+	//	return Server{}, err
+	//}
 
-	err = populateUsers(server, db)
-	if err != nil {
-		return nil, err
-	}
+	//err = populateUsers(server, db)
+	//if err != nil {
+	//	return Server{}, err
+	//}
 
-	err = populateBans(server, db)
-	if err != nil {
-		return nil, err
-	}
+	//err = populateBans(server, db)
+	//if err != nil {
+	//	return Server{}, err
+	//}
 
 	return
 }
@@ -176,7 +177,7 @@ func populateChannelInfoFromDatabase(server *Server, channel *Channel, db *sql.D
 }
 
 // Populate channel with its ACLs by reading the SQLite databse.
-func populateChannelACLFromDatabase(server *Server, channel *Channel, db *sql.DB) error {
+func populateChannelACLFromDatabase(server Server, channel *Channel, db *sql.DB) error {
 	sqlStatement, err := db.Prepare("SELECT user_id, group_name, apply_here, apply_sub, grantpriv, revokepriv FROM acl WHERE server_id=? AND channel_id=? ORDER BY priority")
 	if err != nil {
 		return err
@@ -227,7 +228,7 @@ func populateChannelACLFromDatabase(server *Server, channel *Channel, db *sql.DB
 }
 
 // Populate channel with groups by reading the SQLite database.
-func populateChannelGroupsFromDatabase(server *Server, channel *Channel, db *sql.DB) error {
+func populateChannelGroupsFromDatabase(server Server, channel *Channel, db *sql.DB) error {
 	sqlStatement, err := db.Prepare("SELECT group_id, name, inherit, inheritable FROM groups WHERE server_id=? AND channel_id=?")
 	if err != nil {
 		return err
@@ -265,7 +266,8 @@ func populateChannelGroupsFromDatabase(server *Server, channel *Channel, db *sql
 		return err
 	}
 
-	for gid, group := range groups {
+	// TODO: KV loop was gid/group but group isnt used in loop anymore
+	for gid, _ := range groups {
 		rows, err = sqlStatement.Query(server.ID, gid)
 		if err != nil {
 			return err
@@ -295,7 +297,7 @@ func populateChannelGroupsFromDatabase(server *Server, channel *Channel, db *sql
 }
 
 // Populate the Server with Channels from the database.
-func populateChannelsFromDatabase(server *Server, db *sql.DB, parentID uint32) error {
+func populateChannelsFromDatabase(server Server, db *sql.DB, parentID uint32) error {
 	parentChannel, exists := server.Channels[parentID]
 	if !exists {
 		return errors.New("Non-existant parent")
@@ -330,43 +332,47 @@ func populateChannelsFromDatabase(server *Server, db *sql.DB, parentID uint32) e
 		parentChannel.AddChild(channel)
 	}
 
+	// TODO Fix after embedded DB added
 	// Add channel_info
-	for _, childChannel := range parentChannel.children {
-		err = populateChannelInfoFromDatabase(server, childChannel, db)
-		if err != nil {
-			return err
-		}
-	}
+	//for _, childChannel := range parentChannel.children {
+	//	err = populateChannelInfoFromDatabase(server, childChannel, db)
+	//	if err != nil {
+	//		return err
+	//	}
+	//}
 
+	// TODO Fix after embedded DB added
 	// Add ACLs
-	for _, childChannel := range parentChannel.children {
-		err = populateChannelACLFromDatabase(server, childChannel, db)
-		if err != nil {
-			return err
-		}
-	}
+	//for _, childChannel := range parentChannel.children {
+	//	err = populateChannelACLFromDatabase(server, childChannel, db)
+	//	if err != nil {
+	//		return err
+	//	}
+	//}
 
+	// TODO Fix after embedded DB added
 	// Add groups
-	for _, childChannel := range parentChannel.children {
-		err = populateChannelGroupsFromDatabase(server, childChannel, db)
-		if err != nil {
-			return err
-		}
-	}
+	//for _, childChannel := range parentChannel.children {
+	//	err = populateChannelGroupsFromDatabase(server, childChannel, db)
+	//	if err != nil {
+	//		return err
+	//	}
+	//}
 
+	// TODO Fix after embedded DB added
 	// Add subchannels
-	for id, _ := range parentChannel.children {
-		err = populateChannelsFromDatabase(server, db, id)
-		if err != nil {
-			return err
-		}
-	}
+	//for id, _ := range parentChannel.children {
+	//	err = populateChannelsFromDatabase(server, db, id)
+	//	if err != nil {
+	//		return err
+	//	}
+	//}
 
 	return nil
 }
 
 // Link a Server's channels together
-func populateChannelLinkInfo(server *Server, db *sql.DB) (err error) {
+func populateChannelLinkInfo(server Server, db *sql.DB) (err error) {
 	sqlStatement, err := db.Prepare("SELECT channel_id, link_id FROM channel_links WHERE server_id=?")
 	if err != nil {
 		return err
@@ -403,7 +409,7 @@ func populateChannelLinkInfo(server *Server, db *sql.DB) (err error) {
 	return nil
 }
 
-func populateUsers(server *Server, db *sql.DB) (err error) {
+func populateUsers(server Server, db *sql.DB) (err error) {
 	// Populate the server with regular user data
 	sqlStatement, err := db.Prepare("SELECT user_id, name, pw, lastchannel, texture, strftime('%s', last_active) FROM users WHERE server_id=?")
 	if err != nil {
@@ -506,7 +512,7 @@ func populateUsers(server *Server, db *sql.DB) (err error) {
 }
 
 // Populate bans
-func populateBans(server *Server, db *sql.DB) (err error) {
+func populateBans(server Server, db *sql.DB) (err error) {
 	sqlStatement, err := db.Prepare("SELECT base, mask, name, hash, reason, start, duration FROM bans WHERE server_id=?")
 	if err != nil {
 		return
@@ -532,9 +538,9 @@ func populateBans(server *Server, db *sql.DB) (err error) {
 		}
 
 		if len(IP) == 16 && IP[10] == 0xff && IP[11] == 0xff {
-			Ban.IP = net.IPv4(IP[12], IP[13], IP[14], IP[15])
+			Ban.IPAddress = net.IPv4(IP[12], IP[13], IP[14], IP[15])
 		} else {
-			Ban.IP = IP
+			Ban.IPAddress = IP
 		}
 
 		Ban.SetISOStartDate(StartDate)

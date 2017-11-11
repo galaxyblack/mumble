@@ -3,11 +3,13 @@ package protocol
 import (
 	"strconv"
 	"sync"
+
+	"github.com/golang/protobuf/proto"
 )
 
 var defaultConfig = map[string]string{
 	// TODO: Adding the arguments passed to the fucking program to the fucking config for fucks sake, sorry this is just getting absurdist
-	"DataDir": "~/.local/config/mumble",
+	"DataDirectory": "~/.local/config/mumble",
 	//  TODO: Whats wrong with structs? Is this map really better? It could be a the built in attributes with a custom map for other values...and be way fucking faster, considering
 	// these are probably checked, every time a user does anything?
 	"MaxBandwidth":          "72000",
@@ -23,15 +25,38 @@ var defaultConfig = map[string]string{
 	"SendVersion": "true",
 }
 
+type ConfigKV struct {
+	Key              string `protobuf:"bytes,1,req,name=key" json:"key,omitempty"`
+	Value            string `protobuf:"bytes,2,opt,name=value" json:"value,omitempty"`
+	XXX_unrecognized []byte `json:"-"`
+}
+
+func (configKV *ConfigKV) Reset()         { *configKV = ConfigKV{} }
+func (configKV *ConfigKV) String() string { return proto.CompactTextString(configKV) }
+func (configKV *ConfigKV) ProtoMessage()  {}
+
+func (configKV *ConfigKV) GetKey() string {
+	// TODO: Move validations to own funcs
+	//if configKV != nil && configKV.Key != nil
+	return configKV.Key
+}
+
+func (configKV *ConfigKV) GetValue() string {
+	// TODO: Move validations to own funcs
+	//if configKV != nil && configKV.Value != nil
+	return configKV.Value
+}
+
 type Config struct {
 	// TODO: Define some default values
 	DataDirectory string // TODO: Only fucking one that should be a string!!!!
-
 	// TODO: Break off server specific config, maybe use IPAddr instead of string?
 	IPAddress string
 	Port      int
 	Hostname  string
 
+	// TODO: This could be used for non-standard custom values
+	ConfigKVs []*ConfigKV `protobuf:"bytes,2,rep,name=config" json:"config,omitempty"`
 	// TODO: Should this be uint? Itd be much faster for comparisons, if we are going to do these comparisons all the time anyways
 	MaxBandwidth       uint32
 	MaxUsers           uint32

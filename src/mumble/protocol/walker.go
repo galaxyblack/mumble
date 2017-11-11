@@ -6,13 +6,13 @@ import (
 	"hash/crc32"
 	"io"
 	"math"
-
-	"github.com/golang/protobuf/proto"
+	//"github.com/golang/protobuf/proto"
 )
 
 // Checks whether the error err is an EOF
 // error.
 func isEOF(err error) bool {
+	// TODO: Just return result of if not if then returning newly formed bools
 	if err == io.EOF || err == io.ErrUnexpectedEOF {
 		return true
 	}
@@ -23,7 +23,7 @@ func isEOF(err error) bool {
 // iterating the transaction groups of an
 // immutable Log.
 type Walker struct {
-	r io.Reader
+	reader io.Reader
 }
 
 // Type txReader imlpements a checksumming reader, intended
@@ -32,16 +32,16 @@ type Walker struct {
 // Besides auto-checksumming the read content, it also
 // keeps track of the amount of consumed bytes.
 type txReader struct {
-	r        io.Reader
+	reader   io.Reader
 	crc32    hash.Hash32
 	consumed int
 }
 
 // Create a new txReader for reading a transaction group
 // from the log.
-func newTxReader(r io.Reader) *txReader {
+func newTxReader(reader io.Reader) *txReader {
 	txr := new(txReader)
-	txr.r = r
+	txr.reader = reader
 	txr.crc32 = crc32.NewIEEE()
 	return txr
 }
@@ -49,7 +49,7 @@ func newTxReader(r io.Reader) *txReader {
 // walkReader's Read method. Reads from walkReader's Reader
 // and checksums while reading.
 func (txr *txReader) Read(p []byte) (n int, err error) {
-	n, err = txr.r.Read(p)
+	n, err = txr.reader.Read(p)
 	if err != nil && err != io.EOF {
 		return
 	}
@@ -76,9 +76,9 @@ func (txr *txReader) Consumed() int {
 }
 
 // Create a new Walker that iterates over the log entries of a given Reader.
-func NewReaderWalker(r io.Reader) (walker *Walker, err error) {
+func NewReaderWalker(reader io.Reader) (walker *Walker, err error) {
 	walker = new(Walker)
-	walker.r = r
+	walker.reader = reader
 	return walker, nil
 }
 
@@ -92,6 +92,7 @@ func NewReaderWalker(r io.Reader) (walker *Walker, err error) {
 // On error, Next returns a nil slice and a non-nil err.
 // When the end of the file is reached, Next returns nil, os.EOF.
 func (walker *Walker) Next() (entries []interface{}, err error) {
+	// TODO: Move to struct
 	var (
 		remainBytes uint32
 		remainOps   uint32
@@ -100,7 +101,7 @@ func (walker *Walker) Next() (entries []interface{}, err error) {
 		length      uint16
 	)
 
-	err = binary.Read(walker.r, binary.LittleEndian, &remainBytes)
+	err = binary.Read(walker.reader, binary.LittleEndian, &remainBytes)
 	if isEOF(err) {
 		return nil, io.EOF
 	} else if err != nil {
@@ -114,14 +115,14 @@ func (walker *Walker) Next() (entries []interface{}, err error) {
 		return nil, ErrRecordTooBig
 	}
 
-	err = binary.Read(walker.r, binary.LittleEndian, &remainOps)
+	err = binary.Read(walker.reader, binary.LittleEndian, &remainOps)
 	if isEOF(err) {
 		return nil, ErrUnexpectedEndOfRecord
 	} else if err != nil {
 		return nil, err
 	}
 
-	err = binary.Read(walker.r, binary.LittleEndian, &crcsum)
+	err = binary.Read(walker.reader, binary.LittleEndian, &crcsum)
 	if isEOF(err) {
 		return nil, ErrUnexpectedEndOfRecord
 	} else if err != nil {
@@ -129,7 +130,7 @@ func (walker *Walker) Next() (entries []interface{}, err error) {
 	}
 
 	remainBytes -= 8
-	reader := newTxReader(walker.r)
+	reader := newTxReader(walker.reader)
 
 	for remainOps > 0 {
 		err = binary.Read(reader, binary.LittleEndian, &kind)
@@ -146,81 +147,82 @@ func (walker *Walker) Next() (entries []interface{}, err error) {
 			return nil, err
 		}
 
-		buf := make([]byte, length)
-		_, err = io.ReadFull(reader, buf)
+		buffer := make([]byte, length)
+		_, err = io.ReadFull(reader, buffer)
 		if isEOF(err) {
 			break
 		} else if err != nil {
 			return nil, err
 		}
 
-		switch typeKind(kind) {
-		case ServerType:
-			server := &Server{}
-			err = proto.Unmarshal(buf, server)
-			if isEOF(err) {
-				break
-			} else if err != nil {
-				return nil, err
-			}
-			entries = append(entries, server)
-		case ConfigKeyValuePairType:
-			cfg := &ConfigKeyValuePair{}
-			err = proto.Unmarshal(buf, cfg)
-			if isEOF(err) {
-				break
-			} else if err != nil {
-				return nil, err
-			}
-			entries = append(entries, cfg)
-		case BanListType:
-			banlist := &BanList{}
-			err = proto.Unmarshal(buf, banlist)
-			if isEOF(err) {
-				break
-			} else if err != nil {
-				return nil, err
-			}
-			entries = append(entries, banlist)
-		case UserType:
-			user := &User{}
-			err = proto.Unmarshal(buf, user)
-			if isEOF(err) {
-				break
-			} else if err != nil {
-				return nil, err
-			}
-			entries = append(entries, user)
-		case UserRemoveType:
-			userRemove := &UserRemove{}
-			err = proto.Unmarshal(buf, userRemove)
-			if isEOF(err) {
-				break
-			} else if err != nil {
-				return nil, err
-			}
-			entries = append(entries, userRemove)
-		case ChannelType:
-			channel := &Channel{}
-			err = proto.Unmarshal(buf, channel)
-			if isEOF(err) {
-				break
-			} else if err != nil {
-				return nil, err
-			}
-			entries = append(entries, channel)
-		case ChannelRemoveType:
-			channelRemove := &ChannelRemove{}
-			err = proto.Unmarshal(buf, channelRemove)
-			if isEOF(err) {
-				break
-			} else if err != nil {
-				return nil, err
-			}
-			entries = append(entries, channelRemove)
-		}
+		// TODO: ServerType isn't real, because I got rid of the writer.go file and other missing things in this section
+		//switch typeKind(kind) {
+		//case ServerType:
+		//	server := &Server{}
+		//	err = proto.Unmarshal(buffer, server)
+		//	if isEOF(err) {
+		//		break
+		//	} else if err != nil {
+		//		return nil, err
+		//	}
+		//	entries = append(entries, server)
+		//case ConfigKVType:
+		//	config := &ConfigKV{}
+		//	err = proto.Unmarshal(buffer, config)
+		//	if isEOF(err) {
+		//		break
+		//	} else if err != nil {
+		//		return nil, err
+		//	}
+		//	entries = append(entries, config)
+		//case BanListType:
+		//	banList := &BanList{}
+		//	err = proto.Unmarshal(buffer, banList)
+		//	if isEOF(err) {
+		//		break
+		//	} else if err != nil {
+		//		return nil, err
+		//	}
+		//	entries = append(entries, banList)
+		//case UserType:
+		//	user := &User{}
+		//	err = proto.Unmarshal(buffer, user)
+		//	if isEOF(err) {
+		//		break
+		//	} else if err != nil {
+		//		return nil, err
+		//	}
+		//	entries = append(entries, user)
+		//case UserRemoveType:
+		//	userRemove := &UserRemove{}
+		//	err = proto.Unmarshal(buffer, userRemove)
+		//	if isEOF(err) {
+		//		break
+		//	} else if err != nil {
+		//		return nil, err
+		//	}
+		//	entries = append(entries, userRemove)
+		//case ChannelType:
+		//	channel := &Channel{}
+		//	err = proto.Unmarshal(buffer, channel)
+		//	if isEOF(err) {
+		//		break
+		//	} else if err != nil {
+		//		return nil, err
+		//	}
+		//	entries = append(entries, channel)
+		//case ChannelRemoveType:
+		//	channelRemove := &ChannelRemove{}
+		//	err = proto.Unmarshal(buffer, channelRemove)
+		//	if isEOF(err) {
+		//		break
+		//	} else if err != nil {
+		//		return nil, err
+		//	}
+		//	entries = append(entries, channelRemove)
+		//}
 
-		remainOps -= 1
+		//remainOps -= 1
 		continue
 	}
 

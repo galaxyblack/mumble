@@ -28,12 +28,15 @@ type Client struct {
 	//logForwarder *LogForwarder
 
 	// Connection-related
+
 	tcpAddr    *net.TCPAddr
 	udpAddr    *net.UDPAddr
 	connection net.Conn
 	reader     *bufio.Reader
 	state      int
-	server     *Server
+	// TODO Nah fuck this maybe serverID but not this
+	server   *Server
+	serverID uint32
 
 	udpReceive chan []byte
 
@@ -120,11 +123,11 @@ func (client *Client) HasCertificate() bool {
 // Is the client the SuperUser?
 func (client *Client) IsSuperUser() bool {
 	// TODO: This is repated from earlier, so its definitely needed as a implmeneted as a validation function. Diese is nicht so dry
-	if client.user == nil {
-		return false
-	}
+	//if client.user == nil {
+	return false
+	//}
 	// TODO: Only 1 super user allowed using this method, doesn't seem that flexible, Maybe if we add an attribute or create a user DB, we can actually have roles =p
-	return client.user.ID == 0
+	//return client.user.ID == 0
 
 }
 

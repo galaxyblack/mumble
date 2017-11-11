@@ -2,7 +2,9 @@ package protocol
 
 import (
 	"encoding/hex"
-	"errors"
+	//"errors"
+
+	"github.com/golang/protobuf/proto"
 )
 
 // This file implements Server's handling of Users.
@@ -31,44 +33,37 @@ func (user *User) ProtoMessage()  {}
 
 func (user *User) GetID() uint32 {
 	// TODO: Move validations to own functions
-	if user != nil && user.ID != nil {
-		return *user.ID
-	}
-	return 0
+	//if user != nil && user.ID != nil
+	return user.ID
 }
 
 func (user *User) GetUsername() string {
 	// TODO: Move validations to own functions
-	if user != nil && user.Name != nil {
-		return *user.Name
-	}
-	return ""
+	//if user != nil && user.Name != nil
+	return user.Name
 }
 
 func (user *User) GetPassword() string {
 	// TODO: Move validations to own functions
-	if user != nil && user.Password != nil {
-		return *user.Password
-	}
-	return ""
+	//if user != nil && user.Password != nil
+	return user.Password
 }
 
 func (user *User) GetCertificateHash() string {
 	// TODO: Move validations to own functions
-	if user != nil && user.CertificateHash != nil {
-		return *user.CertHash
-	}
-	return ""
+	//if user != nil && user.CertificateHash != nil
+	return user.CertificateHash
 }
 
 // Create a new User
 func NewUser(id uint32, name string) (user *User, err error) {
-	if id < 0 {
-		return nil, errors.New("Invalid user id")
-	}
-	if len(name) == 0 {
-		return nil, errors.New("Invalid username")
-	}
+	// TODO: Move validations to own functions
+	//if id < 0 {
+	//	return nil, errors.New("Invalid user id")
+	//}
+	//if len(name) == 0 {
+	//	return nil, errors.New("Invalid username")
+	//}
 
 	return &User{
 		ID:   id,

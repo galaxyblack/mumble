@@ -6,18 +6,19 @@ package protocol
 // VoiceTarget entry of a Client.
 type VoiceTarget struct {
 	sessions []uint32
-	channels []voiceTargetChannel
+	channels []Channel
 
 	directCache       map[uint32]*Client
 	fromChannelsCache map[uint32]*Client
 }
 
-type voiceTargetChannel struct {
-	id            uint32
-	childChannels bool
-	links         bool
-	onlyGroup     string
-}
+// TODO: Wtf? Just use a god damn channel struct!!!!!!!
+//type voiceTargetChannel struct {
+//	id            uint32
+//	childChannels bool
+//	links         bool
+//	onlyGroup     string
+//}
 
 // Add's a client's session to the VoiceTarget
 func (voiceTarget *VoiceTarget) AddSession(session uint32) {
@@ -30,11 +31,12 @@ func (voiceTarget *VoiceTarget) AddSession(session uint32) {
 // If group is a non-empty string, any sent voice packets will only be broadcast to members
 // of that group who reside in the channel (or its children or linked channels).
 func (voiceTarget *VoiceTarget) AddChannel(id uint32, children bool, links bool, group string) {
-	voiceTarget.channels = append(voiceTarget.channels, voiceTargetChannel{
-		id:            id,
-		childChannels: children,
-		links:         links,
-		onlyGroup:     group,
+	voiceTarget.channels = append(voiceTarget.channels, Channel{
+		ID: id,
+		// TODO: Fix
+		//children:  children,
+		//links:     links,
+		//onlyGroup: group,
 	})
 }
 
@@ -65,42 +67,45 @@ func (voiceTarget *VoiceTarget) SendVoiceBroadcast(voiceBroadcast *VoiceBroadcas
 		fromChannels = make(map[uint32]*Client)
 
 		for _, voiceTargetChannel := range voiceTarget.channels {
-			channel := server.Channels[int(voiceTargetChannel.id)]
+			channel := server.Channels[voiceTargetChannel.ID]
 			// TODO: This is a validation, get this in its own function, stop writing 200 line god damn functions
 			if channel == nil {
 				continue
 			}
 
-			if !voiceTargetChannel.childChannels && !voiceTargetChannel.links && voiceTargetChannel.onlyGroup == "" {
-				if acl.HasPermission(&channel.ACL, client, acl.WhisperPermission) {
-					for _, target := range channel.clients {
-						fromChannels[target.Session()] = target
-					}
-				}
-			} else {
-				server.Printf("%v", voiceTargetChannel)
-				newChannels := make(map[int]*Channel)
-				if voiceTargetChannel.links {
-					newChannels = channel.AllLinks()
-				} else {
-					newChannels[channel.ID] = channel
-				}
-				if voiceTargetChannel.childChannels {
-					childChannels := channel.AllChildChannels()
-					for key, value := range childChannels {
-						newChannels[key] = value
-					}
-				}
-				for _, newChannel := range newChannels {
-					if acl.HasPermission(&newChannel.ACL, client, acl.WhisperPermission) {
-						for _, target := range newChannel.clients {
-							if voiceTargetChannel.onlyGroup == "" || acl.GroupMemberCheck(&newChannel.ACL, &newChannel.ACL, voiceTargetChannel.onlyGroup, target) {
-								fromChannels[target.Session()] = target
-							}
-						}
-					}
-				}
-			}
+			// TODO: Move validation to own func
+			//if !voiceTargetChannel.children && !voiceTargetChannel.links && voiceTargetChannel.onlyGroup == "" {
+			// TODO: Fix after fixing Haspermission
+			//if HasPermission(&channel.ACL, client, acl.WhisperPermission) {
+			//	for _, target := range channel.clients {
+			//		fromChannels[target.Session()] = target
+			//	}
+			//}
+			//} else {
+			// TODO: WTF? Use the Channel object, stop this voiceTargetChannel bs
+			//	server.Printf("%v", voiceTargetChannel)
+			//	newChannels := make(map[int]*Channel)
+			//	if voiceTargetChannel.links {
+			//		newChannels = channel.AllLinks()
+			//	} else {
+			//		newChannels[channel.ID] = channel
+			//	}
+			//	if voiceTargetChannel.childChannels {
+			//		childChannels := channel.AllChildChannels()
+			//		for key, value := range childChannels {
+			//			newChannels[key] = value
+			//		}
+			//	}
+			//	for _, newChannel := range newChannels {
+			//		if acl.HasPermission(&newChannel.ACL, client, acl.WhisperPermission) {
+			//			for _, target := range newChannel.clients {
+			//				if voiceTargetChannel.onlyGroup == "" || acl.GroupMemberCheck(&newChannel.ACL, &newChannel.ACL, voiceTargetChannel.onlyGroup, target) {
+			//					fromChannels[target.Session()] = target
+			//				}
+			//			}
+			//		}
+			//	}
+			//}
 		}
 
 		for _, session := range voiceTarget.sessions {
@@ -121,7 +126,7 @@ func (voiceTarget *VoiceTarget) SendVoiceBroadcast(voiceBroadcast *VoiceBroadcas
 		}
 
 		if voiceTarget.fromChannelsCache == nil {
-			vt.fromChannelsCache = fromChannels
+			voiceTarget.fromChannelsCache = fromChannels
 		}
 	}
 
@@ -132,7 +137,8 @@ func (voiceTarget *VoiceTarget) SendVoiceBroadcast(voiceBroadcast *VoiceBroadcas
 			buffer[0] = kind | 2
 			err := target.SendUDP(buffer)
 			if err != nil {
-				target.Panicf("Unable to send UDP packet: %v", err.Error())
+				// TODO: Use central error logging system
+				//target.Panic("Unable to send UDP packet: %v", err.Error())
 			}
 		}
 	}
@@ -143,7 +149,8 @@ func (voiceTarget *VoiceTarget) SendVoiceBroadcast(voiceBroadcast *VoiceBroadcas
 			target.SendUDP(buffer)
 			err := target.SendUDP(buffer)
 			if err != nil {
-				target.Panicf("Unable to send UDP packet: %v", err.Error())
+				// TODO: Use central error logging system
+				//target.Panic("Unable to send UDP packet: %v", err.Error())
 			}
 		}
 	}

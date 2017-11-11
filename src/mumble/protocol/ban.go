@@ -3,6 +3,8 @@ package protocol
 import (
 	"net"
 	"time"
+
+	"github.com/golang/protobuf/proto"
 )
 
 const (
@@ -25,7 +27,7 @@ type Ban struct {
 	CertificateHash  string `protobuf:"bytes,4,opt,name=cert_hash" json:"cert_hash,omitempty"`
 	Reason           string `protobuf:"bytes,5,opt,name=reason" json:"reason,omitempty"`
 	Start            int64  `protobuf:"varint,6,opt,name=start" json:"start,omitempty"`
-	Duration         uint32 `protobuf:"varint,7,opt,name=duration" json:"duration,omitempty"`
+	Duration         int64  `protobuf:"varint,7,opt,name=duration" json:"duration,omitempty"`
 	XXX_unrecognized []byte `json:"-"`
 }
 
@@ -36,38 +38,34 @@ func (ban *Ban) String() string { return proto.CompactTextString(ban) }
 func (*Ban) ProtoMessage()      {}
 
 func (ban *Ban) GetIPAddress() []byte {
-	if ban != nil {
-		return ban.IPAddress
-	}
-	return nil
+	// TODO: Move validations to own funcs
+	//if ban != nil
+	return ban.IPAddress
 }
 
 func (ban *Ban) GetMask() uint32 {
-	if ban != nil && ban.Mask != nil {
-		return *ban.Mask
-	}
-	return 0
+	// TODO: Move validations to own funcs
+	//if ban != nil && ban.Mask != nil
+	return ban.Mask
 }
 
 func (ban *Ban) GetUsername() string {
-	if ban != nil && ban.Username != nil {
-		return *ban.Username
-	}
-	// TODO: seems like this should be caught with an error or validated against in other places if this is even possible
-	return ""
+	// TODO: Move validations to own funcs
+	//if ban != nil && ban.Username != nil
+	return ban.Username
+	// TODO: seems like this should be caught with an error or validated against in other places if this is even possible. dont return ""
 }
 
 func (ban *Ban) GetCertificateHash() string {
-	if ban != nil && ban.CertificateHash != nil {
-		return *ban.CertificateHash
-	}
-	return ""
+	// TODO: Move validations to own funcs
+	//if ban != nil && ban.CertificateHash != nil {
+	return ban.CertificateHash
 }
 
 func (ban *Ban) GetReason() string {
-	if ban != nil && ban.Reason != nil {
-		return ban.Reason
-	}
+	// TODO: Move validations to own funcs
+	//if ban != nil && ban.Reason != nil
+	return ban.Reason
 }
 
 // Create a net.IPMask from a specified amount of mask bits
@@ -90,9 +88,11 @@ func (ban Ban) IPMask() (mask net.IPMask) {
 
 // Check whether an IP matches a Ban
 func (ban Ban) Match(ip net.IP) bool {
-	banned := ban.IP.Mask(ban.IPMask())
-	masked := ip.Mask(ban.IPMask())
-	return banned.Equal(masked)
+	// TODO Fuck no
+	//banned := ban.IP.Mask(ban.IPMask())
+	//masked := ip.Mask(ban.IPMask())
+	//return banned.Equal(masked)
+	return false
 }
 
 // Set Start date from an ISO 8601 date (in UTC)

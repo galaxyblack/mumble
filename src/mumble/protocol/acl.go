@@ -125,7 +125,7 @@ func (acl *ACL) HasPermission(ctx *Context, user User, permission Permission) bo
 	defaults := Permission(TraversePermission | EnterPermission | SpeakPermission | WhisperPermission | TextMessagePermission)
 	granted := defaults
 	contexts := buildChain(ctx)
-	origCtx := ctx
+	//origCtx := ctx
 
 	traverse := true
 	write := false
@@ -138,42 +138,42 @@ func (acl *ACL) HasPermission(ctx *Context, user User, permission Permission) bo
 		// Iterate through ACLs that are defined on ctx. Note: this does not include
 		// ACLs that iter has inherited from a parent (unless there is also a group on
 		// iter with the same name, that changes the permissions a bit!)
-		for _, acl := range ctx.ACLs {
-			// Determine whether the ACL applies to user.
-			// If it is a user ACL and the user id of the ACL
-			// matches user's id, we're good to go.
-			//
-			// If it's a group ACL, we have to parse and interpret
-			// the group string in the current context to determine
-			// membership. For that we use GroupMemberCheck.
-			// TODO: This was checking IsUserACL, but that really makes no sense at all
-			// UserID is uint32 and it checks against -1 which is literally impossible
-			/// given this datatype. This is just trying to get it building agian but
-			// like other spots this needs to be cleaned up because this is sad and ugly
+		//for _, acl := range ctx.ACLs {
+		// Determine whether the ACL applies to user.
+		// If it is a user ACL and the user id of the ACL
+		// matches user's id, we're good to go.
+		//
+		// If it's a group ACL, we have to parse and interpret
+		// the group string in the current context to determine
+		// membership. For that we use GroupMemberCheck.
+		// TODO: This was checking IsUserACL, but that really makes no sense at all
+		// UserID is uint32 and it checks against -1 which is literally impossible
+		/// given this datatype. This is just trying to get it building agian but
+		// like other spots this needs to be cleaned up because this is sad and ugly
 
-			// TODO: It appears there are two types of ACL, Channel and User, so check for User and then do user specifi actions? Do we have channel specific actions?
-			if acl.IsUserACL() {
-				matchUser := acl.UserID
-				matchGroup := GroupMemberCheck(origCtx, ctx, acl.Group, user)
+		// TODO: It appears there are two types of ACL, Channel and User, so check for User and then do user specifi actions? Do we have channel specific actions?
+		//if acl.IsUserACL() {
+		//	matchUser := acl.UserID
+		//	matchGroup := GroupMemberCheck(origCtx, ctx, acl.Group, user)
 
-				if acl.AllowPermission.isSet(TraversePermission) {
-					traverse = true
-				}
-				if acl.DenyPermission.isSet(TraversePermission) {
-					traverse = false
-				}
-				if acl.AllowPermission.isSet(WritePermission) {
-					write = true
-				}
-				if acl.DenyPermission.isSet(WritePermission) {
-					write = false
-				}
-				if (origCtx == ctx && acl.ApplyHere) || (origCtx != ctx && acl.ApplySubs) {
-					granted |= acl.AllowPermission
-					granted &= ^acl.DenyPermission
-				}
-			}
-		}
+		//	if acl.AllowPermission.isSet(TraversePermission) {
+		//		traverse = true
+		//	}
+		//	if acl.DenyPermission.isSet(TraversePermission) {
+		//		traverse = false
+		//	}
+		//	if acl.AllowPermission.isSet(WritePermission) {
+		//		write = true
+		//	}
+		//	if acl.DenyPermission.isSet(WritePermission) {
+		//		write = false
+		//	}
+		//	if (origCtx == ctx && acl.ApplyHere) || (origCtx != ctx && acl.ApplySubs) {
+		//		granted |= acl.AllowPermission
+		//		granted &= ^acl.DenyPermission
+		//	}
+		//}
+		//}
 		// If traverse is not set and the user doesn't have write permissions
 		// on the channel, the user will not have any permissions.
 		// This is because -traverse removes all permissions, and +write grants
