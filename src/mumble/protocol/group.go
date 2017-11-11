@@ -1,31 +1,54 @@
 package protocol
 
 import (
+	"fmt"
 	"log"
 	//"strconv"
 	"strings"
+
+	"github.com/golang/protobuf/proto"
 )
 
 // Group represents a Group in an Context.
 type Group struct {
-	// The name of this group
-	Name string
-
-	// The inherit flag means that this group will inherit group
-	// members from its parent.
-	Inherit bool
-
-	// The inheritable flag means that subchannels can
-	// inherit the members of this group.
-	Inheritable bool
-
-	// TODO: Seems way excessive
 	// Group adds permissions to these users
-	Add map[uint32]bool
+	//Add map[uint32]bool
 	// Group removes permissions from these users
-	Remove map[uint32]bool
+	//Remove map[uint32]bool
 	// Temporary add (authenticators)
-	Temporary map[uint32]bool
+	Temporary        map[uint32]bool // TODO: Does this need protocolbufs? or exist at all?
+	Name             string          `protobuf:"bytes,1,opt,name=name" json:"name,omitempty"`
+	Inherit          bool            `protobuf:"varint,2,opt,name=inherit" json:"inherit,omitempty"`
+	Inheritable      bool            `protobuf:"varint,3,opt,name=inheritable" json:"inheritable,omitempty"`
+	AddedUserIDs     []uint32        `protobuf:"varint,4,rep,name=add" json:"add,omitempty"`
+	RemovedUserIDs   []uint32        `protobuf:"varint,5,rep,name=remove" json:"remove,omitempty"`
+	XXX_unrecognized []byte          `json:"-"`
+}
+
+func (group *Group) Reset()         { *group = Group{} }
+func (group *Group) String() string { return proto.CompactTextString(group) }
+func (group *Group) ProtoMessage()  {}
+
+func (group *Group) GetName() string {
+	// TODO: make validation fucks, tehse are just checking if not empty, generic string empty check would be best
+	//if group != nil && group.Name != nil
+	return group.Name
+}
+
+func (group *Group) GetInherit() bool {
+	// TODO: Why not just return result?
+	// TODO: make validation fucks, tehse are just checking if not empty, generic string empty check would be best
+	//if group != nil && group.Inherit != nil
+	return group.Inherit
+}
+
+func (group *Group) GetInheritable() bool {
+	// TODO: move validation to own funcs
+	//if group != nil && group.Inheritable != nil
+	return group.Inheritable
+}
+
+func init() {
 }
 
 // EmptyGroupWithName creates a new Group with the given name.
@@ -34,41 +57,50 @@ type Group struct {
 func NewGroup(name string) Group {
 	// TODO: Check if name is nil or empty, then set a default or random one to avoid erroring unnecessarily
 	return Group{
-		Name:      name,
-		Add:       make(map[uint32]bool),
-		Remove:    make(map[uint32]bool),
-		Temporary: make(map[uint32]bool),
+		Name:           name,
+		AddedUserIDs:   []uint32{},
+		RemovedUserIDs: []uint32{},
+		Temporary:      make(map[uint32]bool),
 	}
 }
 
-// AddContains checks whether the Add set contains id.
-func (group *Group) AddContains(id uint32) (ok bool) {
+// IsUserIDAdded checks whether the Add set contains id.
+func (group *Group) IsUserIDAdded(id uint32) bool {
 	// TODO: Get rid of ok, not useful, use errors!
-	_, ok = group.Add[id]
-	return
+	for uid, _ := range group.AddedUserIDs {
+		fmt.Println("wtf is uid: ", uid)
+		// TODO: Feels like uid should already be a fucking uint32{}
+		if id == uint32(uid) {
+			return true
+		}
+	}
+	return false
 }
 
-// AddUsers gets the list of user ids in the Add set.
-func (group *Group) AddUsers() []uint32 {
+// AddedUsers gets the list of user ids in the Add set.
+func (group *Group) AddedUsers() (users []uint32) {
 	// TODO: This is not a slice of users actually, its a slice of userIDs
-	users := []uint32{}
-	for uid, _ := range group.Add {
-		users = append(users, uid)
+	for uid, _ := range group.AddedUserIDs {
+		// TODO: Grab actual users or this is useless we have a list of the ids
+		users = append(users, uint32(uid))
 	}
 	return users
 }
 
 // RemoveContains checks whether the Remove set contains id.
-func (group *Group) RemoveContains(id uint32) (ok bool) {
-	_, ok = group.Remove[id]
-	return
+func (group *Group) IsUserIDRemoved(id uint32) bool {
+	for uid, _ := range group.RemovedUserIDs {
+		if id == uint32(uid) {
+			return true
+		}
+	}
+	return false
 }
 
-// RemoveUsers gets the list of user ids in the Remove set.
-func (group *Group) RemoveUsers() []uint32 {
-	users := []uint32{}
-	for uid, _ := range group.Remove {
-		users = append(users, uid)
+// RemovedUsers gets the list of user ids in the Remove set.
+func (group *Group) RemovedUsers() (users []uint32) {
+	for uid, _ := range group.RemovedUserIDs {
+		users = append(users, uint32(uid))
 	}
 	return users
 }
@@ -81,10 +113,8 @@ func (group *Group) TemporaryContains(id uint32) (ok bool) {
 
 // MembersInContext gets the set of user id's from the group in the given context.
 // This includes group members that have been inherited from an ancestor context.
-func (group *Group) MembersInContext(context *Context) map[uint32]bool {
+func (group *Group) MembersInContext(context *Context) (members []uint32) {
 	groups := []Group{}
-	members := map[uint32]bool{}
-
 	// Walk a group's context chain, starting with the context the group
 	// is defined on, followed by its parent contexts.
 	// TODO: Whats the point of just recreating the same variable? Just wastes resources
@@ -116,14 +146,14 @@ func (group *Group) MembersInContext(context *Context) map[uint32]bool {
 
 	// TODO: use embedded key/value store and simplify this software
 	for _, currentGroup := range groups {
-		for uid, _ := range currentGroup.Add {
-			members[uid] = true
+		for uid, _ := range currentGroup.AddedUserIDs {
+			members = append(members, uint32(uid))
 		}
-		for uid, _ := range currentGroup.Remove {
-			delete(members, uid)
-		}
+		// TODO: lets just use a key value store ok?
+		//for uid, _ := range currentGroup.RemovedUserIDs {
+		//	delete(members, uid)
+		//}
 	}
-
 	return members
 }
 
@@ -205,6 +235,7 @@ func GroupMemberCheck(current *Context, acl *Context, name string, user User) (o
 	} else if hash {
 		// The client is part of this group if the remaining name matches the
 		// client's cert hash.
+		// TODO:SECURITY: Do deep compare so people can't pretend to be an admin
 		if strings.ToLower(name) == strings.ToLower(user.CertificateHash) {
 			// TODO: Again just return result of if statement
 			return true
@@ -277,7 +308,7 @@ func GroupMemberCheck(current *Context, acl *Context, name string, user User) (o
 			//if group.AddContains(user.ID) || group.TemporaryContains(user.ID) || group.TemporaryContains(-int(user.Session())) {
 			//	isMember = true
 			//}
-			if group.RemoveContains(user.ID) {
+			if group.IsUserIDRemoved(user.ID) {
 				isMember = false
 			}
 		}

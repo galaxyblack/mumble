@@ -9,7 +9,7 @@ type Context struct {
 	Parent *Context
 
 	// ACLs is the Context's list of ACL entries.
-	ACLs []acl
+	ACLs []ACL
 
 	// Groups is the Context's representation of groups.
 	// It is indexed by the Group's name.

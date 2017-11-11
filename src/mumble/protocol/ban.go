@@ -10,13 +10,64 @@ const (
 )
 
 type Ban struct {
-	IP              net.IP
-	Mask            int
-	Username        string
-	CertificateHash string
-	Reason          string
-	Start           int64
-	Duration        int64
+	//IP              net.IP
+	//Mask            int
+	//Username        string
+	//CertificateHash string
+	//Reason          string
+	//Start           int64
+	//Duration        int64
+	IPAddress []byte `protobuf:"bytes,1,opt,name=ip" json:"ip,omitempty"`
+	// TODO: Think about using other client attributes to ban to avoid just jumping IP
+	// TODO: Why are these all pointers? Is there a major advantage to this? It makes things less threadsafe and error prone and the data being passed around would not be that large
+	Mask             uint32 `protobuf:"varint,2,opt,name=mask" json:"mask,omitempty"`
+	Username         string `protobuf:"bytes,3,opt,name=username" json:"username,omitempty"`
+	CertificateHash  string `protobuf:"bytes,4,opt,name=cert_hash" json:"cert_hash,omitempty"`
+	Reason           string `protobuf:"bytes,5,opt,name=reason" json:"reason,omitempty"`
+	Start            int64  `protobuf:"varint,6,opt,name=start" json:"start,omitempty"`
+	Duration         uint32 `protobuf:"varint,7,opt,name=duration" json:"duration,omitempty"`
+	XXX_unrecognized []byte `json:"-"`
+}
+
+// TODO: this? inconsistent usage and i prefer self, will just continue scheme used other places.
+// so a JS programmer? explains  ALOT :p
+func (ban *Ban) Reset()         { *ban = Ban{} }
+func (ban *Ban) String() string { return proto.CompactTextString(ban) }
+func (*Ban) ProtoMessage()      {}
+
+func (ban *Ban) GetIPAddress() []byte {
+	if ban != nil {
+		return ban.IPAddress
+	}
+	return nil
+}
+
+func (ban *Ban) GetMask() uint32 {
+	if ban != nil && ban.Mask != nil {
+		return *ban.Mask
+	}
+	return 0
+}
+
+func (ban *Ban) GetUsername() string {
+	if ban != nil && ban.Username != nil {
+		return *ban.Username
+	}
+	// TODO: seems like this should be caught with an error or validated against in other places if this is even possible
+	return ""
+}
+
+func (ban *Ban) GetCertificateHash() string {
+	if ban != nil && ban.CertificateHash != nil {
+		return *ban.CertificateHash
+	}
+	return ""
+}
+
+func (ban *Ban) GetReason() string {
+	if ban != nil && ban.Reason != nil {
+		return ban.Reason
+	}
 }
 
 // Create a net.IPMask from a specified amount of mask bits

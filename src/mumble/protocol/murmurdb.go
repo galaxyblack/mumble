@@ -163,7 +163,7 @@ func populateChannelInfoFromDatabase(server *Server, channel *Channel, db *sql.D
 		return err
 	}
 	for rows.Next() {
-		var position int
+		var position int32
 		if err := rows.Scan(&position); err != nil {
 			return err
 		}
@@ -282,11 +282,12 @@ func populateChannelGroupsFromDatabase(server *Server, channel *Channel, db *sql
 				return err
 			}
 
-			if Add {
-				group.Add[UserID] = true
-			} else {
-				group.Remove[UserID] = true
-			}
+			// TODO: Create group methods for adding and removing user ids, only has id checking
+			//if Add {
+			//	group.Add[UserID] = true
+			//} else {
+			//	group.Remove[UserID] = true
+			//}
 		}
 	}
 

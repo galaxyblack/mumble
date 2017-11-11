@@ -128,9 +128,10 @@ func (client *Client) IsSuperUser() bool {
 
 }
 
-func (client *Client) ACLContext() *acl {
-	return &client.Channel.ACL
-}
+// TODO: Why do we have ACLs and ACL, this sucks, either make ACL just position 0 or beter a list of ACLs or even ACLIDs
+//func (client *Client) ACLContext() ACL {
+//	return client.Channel.ACL
+//}
 
 func (client *Client) CertificateHash() string {
 	return client.certificateHash

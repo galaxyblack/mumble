@@ -26,6 +26,12 @@ var defaultConfig = map[string]string{
 type Config struct {
 	// TODO: Define some default values
 	DataDirectory string // TODO: Only fucking one that should be a string!!!!
+
+	// TODO: Break off server specific config, maybe use IPAddr instead of string?
+	IPAddress string
+	Port      int
+	Hostname  string
+
 	// TODO: Should this be uint? Itd be much faster for comparisons, if we are going to do these comparisons all the time anyways
 	MaxBandwidth       uint32
 	MaxUsers           uint32

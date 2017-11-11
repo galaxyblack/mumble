@@ -276,13 +276,14 @@ func (server *Server) handleChannelStateMessage(client *Client, message *Message
 		channel = server.AddChannel(name)
 		channel.DescriptionBlob = key
 		channel.temporary = *channelState.Temporary
-		channel.Position = int(*channelState.Position)
+		channel.Position = *channelState.Position
 		parent.AddChild(channel)
 
 		// Add the creator to the channel's admin group
 		if client.IsRegistered() {
-			group := NewGroup("admin")
-			group.Add[client.UserID()] = true
+			// TODO: No this should be in a method of group, adding members should not be implemented inline in message
+			//group := NewGroup("admin")
+			//group.Add[client.UserID()] = true
 			// TODO: Gonna need to correct this
 			//channel.ACL.Groups["admin"] = group
 		}
@@ -464,7 +465,7 @@ func (server *Server) handleChannelStateMessage(client *Client, message *Message
 
 		// Position change
 		if channelState.Position != nil {
-			channel.Position = int(*channelState.Position)
+			channel.Position = *channelState.Position
 		}
 
 		// Add links
