@@ -26,6 +26,7 @@ goinstall.log
 build/
 src/github.com
 src/golang.org
+src/gopkg.in
 bin/
 pkg/
 *.swp
