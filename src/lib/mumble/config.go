@@ -8,8 +8,15 @@ import (
 )
 
 type Config struct {
-	// TODO: Define some default values
-	DataDirectory string // TODO: Only fucking one that should be a string!!!!
+	// Flags, Env
+	DataPath   string
+	ConfigFile string
+	LogFile    string
+	Debug      bool
+
+	// Mumble Protocol
+	SendOSInfo bool
+
 	// TODO: Break off server specific config, maybe use IPAddr instead of string?
 	IPAddress string
 	Port      int

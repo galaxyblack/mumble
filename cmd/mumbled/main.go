@@ -4,85 +4,212 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	//"regexp"
 
 	"lib/mumble"
+	"lib/uput/valid"
 
+	db "github.com/tidwall/buntdb"
 	cli "github.com/urfave/cli"
+	//"github.com/urfave/cli/altsrc"
 )
 
 // TODO:LIST
-// 1) Switch out the Flags/CLI framework to simplify the command-line and add feature improvements
+// 1) Switch out the file based and map system configuration system in favor of an embedded DB solution like BoltDB (will remove 40% of the code base, and simplify development/debugging)
 // 2) Switch out the builtin logging system implemented across several files/objects for a community built centralized logging solution
-// 3) Switch out the file based and map system configuration system in favor of an embedded DB solution like BoltDB (will remove 40% of the code base, and simplify development/debugging)
-// 4) Using the new systems convert the configuration system to using the embedded DB
-// 5) Rebuild the server, client, acl and other objects using the embedded KV DB
-// 6) Upgrade the SHA1 password hashing system for at least SHA256, better would be adding OTP, keypair based guest system with later registration
+// 3) Using the new systems convert the configuration system to using the embedded DB
+// 4) Rebuild the server, client, acl and other objects using the embedded KV DB
+// 5) Upgrade the SHA1 password hashing system for at least SHA256, better would be adding OTP, keypair based guest system with later registration
 
 // At that point it should be ready for 0.1.0 alpha release
 
-var err error
+type Locale struct {
+	language string
+	filetype string
+	text     *db.DB
+}
 
 type Command struct {
-	name     string
-	config   mumble.Config
-	dataPath string
+	cache *db.DB // in memory buntdb
+	// TODO: Support i18n, multiple language support from the beginning
+	locale  Locale
+	server  mumble.Server
+	cluster []*mumble.Server
 	// TODO: Probably eventually define all commands and flags here
 }
 
-func main() {
-	command := Command{
-		name:     "mumbled",
-		config:   mumble.Config{},
-		dataPath: filepath.Join(os.Getenv("HOME"), ".local/config/mumbled"),
-	}
-	// TODO: It only makes sense to have multiple servers in the case we are clustering and managing either multiple servers locally or both locally and remotely. This is fine but the functionality was never present in grumble, so for now it would be fine to leave this but all other server logic or even clustering logic should be in appropriate server.go or cluster.go files
-	// TODO: Also all this would be better in embedded DB not a map
-	//servers := make(map[uint32]protocol.Server)
+// Command Print
+func (command *Command) PrintBanner() {
+	fmt.Println(command.server.Name + " " + command.server.Version.ToString())
+	fmt.Println("=============")
+}
 
+func (command *Command) PrintNotImplemented() {
+	fmt.Println("[DEBUGGING] Not implemented")
+}
+
+func (command *Command) PrintConfiguration() {
+	fmt.Println("["+command.server.Name+"] Data directory is currently set to: ", command.server.Config.DataPath)
+	fmt.Println("["+command.server.Name+"] Config file name is currently set to: ", command.server.Config.ConfigFile)
+	fmt.Println("["+command.server.Name+"] Log file name is currently set to: ", command.server.Config.LogFile)
+}
+
+func main() {
+	//var err error
+	const commandName = "mumbled"
+	// TODO: Support YAML, JSON, XML, and TOML formats
+	// Default filetypes
+	const configFiletype = "yaml"
+	const localeFiletype = "yaml"
+	const logFiletype = "json"
+
+	cache, _ := db.Open(":memory:")
+	textCache, _ := db.Open(":memory:")
+	serverDB, _ := db.Open(":memory:")
+
+	command := Command{
+		cache: cache,
+		locale: Locale{
+			language: "en_GB",
+			filetype: localeFiletype,
+			text:     textCache,
+		},
+		server: mumble.Server{
+			Name: commandName,
+			DB:   serverDB,
+			Config: mumble.Config{
+				DataPath:   filepath.Join(os.Getenv("HOME"), ".local/config/", commandName),
+				ConfigFile: (commandName + "." + configFiletype),
+				LogFile:    (commandName + "." + logFiletype),
+			},
+			Version: mumble.Version{
+				Major: 0,
+				Minor: 0,
+				Patch: 1,
+			},
+		},
+	}
+	command.PrintBanner()
 	// LIB:cli:command line tool framework
-	// This is great because we can take out 50% of this file, giving us access to better features,
-	// community updates and less code to manage. This lets us focus on writing mumble protocol specific code.
+	// This is great because we can take out 50% of this file, giving us access to better feature set,
+	// community vetting, updates and less code to manage. Lets focus on writing mumble protocol specific code.
 	app := cli.NewApp()
+	app.Name = commandName
+	app.Version = command.server.Version.ToString()
+	// Flags
 	app.Flags = []cli.Flag{
 		cli.StringFlag{
-			Name:  "data",
-			Value: command.dataPath,
-			Usage: "The default " + command.name + " application data directory",
+			Name:   "data, d",
+			Value:  command.server.Config.DataPath,
+			Usage:  (commandName + " application data directory `PATH`"),
+			EnvVar: (strings.ToUpper(commandName) + "_DATA_PATH"),
 		},
 		cli.StringFlag{
-			Name:  "log",
-			Value: (command.name + ".log"),
-			Usage: "Filename of log file located in " + command.name + " data directory",
+			Name:     "log, l",
+			Value:    (commandName + "." + logFiletype),
+			Usage:    ("log to `FILE`"),
+			EnvVar:   (strings.ToUpper(commandName) + "_LOG_FILE"),
+			FilePath: command.server.Config.DataPath,
 		},
 		cli.StringFlag{
-			Name:  "config",
-			Value: (command.name + ".yaml"),
-			Usage: "Filename of config file located in " + command.name + " data directory",
+			Name:     "config, c",
+			Value:    (commandName + "." + configFiletype),
+			Usage:    ("load config from `FILE`"),
+			EnvVar:   (strings.ToUpper(commandName) + "_CONFIG_FILE"),
+			FilePath: command.server.Config.DataPath,
+		},
+		cli.StringFlag{
+			Name:     "locale, lcl",
+			Value:    (commandName + "." + localeFiletype),
+			Usage:    ("load config from `FILE`"),
+			EnvVar:   (strings.ToUpper(commandName) + "_CONFIG_FILE"),
+			FilePath: command.server.Config.DataPath,
+		},
+		cli.BoolFlag{
+			Name:   "debug, dbg",
+			Usage:  ("print logs to stdout in addition to writing to log file"),
+			EnvVar: (strings.ToUpper(commandName) + "_DEBUG"),
 		},
 	}
+	// Commands
+	// TODO: Technically these belong in mumble-cli but for now we will just implement it in the daemon, and break it out
+	// only because we are refactoring and it is easier to rebuild logic within the same file
+	app.Commands = []cli.Command{
+		{
+			Name:    "generate-keys",
+			Aliases: []string{"genkey", "keygen", "kgen", "kg"},
+			Usage:   "Generate new server keys",
+			Action: func(c *cli.Context) error {
+				// TODO: If exists, ask before overwriting
+				fmt.Println("[Error] Not implemented")
+				return nil
+			},
+		},
+		{
+			Name:    "generate-certificate",
+			Aliases: []string{"certgen", "gencert", "cgen", "cg"},
+			Usage:   "Generate new server TLS certificate",
+			Action: func(c *cli.Context) error {
+				// TODO: If exists ask before overwriting
+				fmt.Println("[Error] Not implemented")
+				return nil
+			},
+		},
+		{
+			Name:    "import-murmurdb",
+			Aliases: []string{"importdb", "idb"},
+			Usage:   "Import server database from existing murmur SQLite database",
+			Action: func(c *cli.Context) error {
+				// TODO: If exists ask before overwriting
+				return nil
+			},
+		},
+		{
+			Name:    "version",
+			Aliases: []string{"v"},
+			Usage:   "Print the version",
+			Action: func(c *cli.Context) error {
+				// TODO: If exists ask before overwriting
+				fmt.Println(commandName + " version " + command.server.Version.ToString())
+				return nil
+			},
+		},
+	}
+	sort.Sort(cli.FlagsByName(app.Flags))
+	sort.Sort(cli.CommandsByName(app.Commands))
 
-	// [ Below values potentially can be loaded from a build config, perhaps have these be in gravity go build tool ]
-	app.Name = command.name
-	// # Args that should have been actions not flags
-	//RegenKeys     bool - THIS SHOULD BE A FUCKING ACTION
-	//SQLiteDB 			string
-	//CleanUp  			bool
+	// Config File (YAML, TOML, JSON, XML)
+	// "github.com/urfave/cli/altsrc"
+	// altsrc.NewIntFlag(cli.IntFlag{Name: "test"})
+	// YAML Example
+	// command.Before = altsrc.InitInputSourceWithContext(command.Flags, NewYamlSourceFromFlagFunc("load"))
 	app.Action = func(c *cli.Context) error {
-		fmt.Println(command.name)
-		fmt.Println("==========")
-		fmt.Println("["+command.name+"] Data directory is currently set to: ", c.String("data"))
-		fmt.Println("["+command.name+"] Log file name is currently set to: ", c.String("log"))
-		fmt.Println("["+command.name+"] Config file name is currently set to: ", c.String("config"))
+		// Input
+		// If c.String("data") is not default, it is overriding the default
+		if c.String("data") != command.server.Config.DataPath {
+			// + dataPath Input Validation
+			fmt.Println("Default data path overriden by cli-framework data: ", c.String("data"))
+			// VALIDATE:STRING: Not empty.
 
-		// Input Arguments
-		// - Input Validation
-		// If not default value, validate not empty
-		if c.String("data") == "" {
+			//func (str string) IsEmpty() {
+			//  fmt.Println("test")
+			//}
 
+			userInput, err := valid.IfString("test").IsUppercase().IsEmpty().IsValid()
+			if err != nil {
+				fmt.Println("userInput experienced an error: ", err)
+			} else {
+				fmt.Println("validated and usable userInput is:", userInput)
+			}
+
+			//fmt.Println("Is it empty? ", c.String("data").IsEmpty())
+
+			// VALIDATE:STRING: Valid posix path format.
 		}
-		// If not default value, validate path format
 
+		// If not default value, validate path format
 		if c.NArg() > 0 {
 			firstArg := c.Args().Get(0)
 			fmt.Println("First arg is : ", firstArg)
@@ -202,19 +329,6 @@ func main() {
 	////	names, err := directory.Readdirnames(-1)
 	////	if err != nil {
 	////		log.Fatalf("Murmur import failed: %s", err.Error())
-	////	}
-
-	////	// TODO: don't bother counting past 1 if you only want to know if its greater than 1
-	////	if !Args.CleanUp && len(names) > 0 {
-	////		log.Fatalf("Non-empty datadir. Refusing to import Murmur data.")
-	////	}
-	////	if Args.CleanUp {
-	////		log.Print("Cleaning up existing data directory")
-	////		for _, name := range names {
-	////			if err := os.RemoveAll(filepath.Join(Args.DataDirectory, name)); err != nil {
-	////				log.Fatalf("Unable to cleanup file: %s", name)
-	////			}
-	////		}
 	////	}
 
 	////	log.Printf("Importing Murmur data from '%s'", Args.SQLiteDB)

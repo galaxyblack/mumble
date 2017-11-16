@@ -10,7 +10,7 @@ import (
 
 	"lib/mumble/protocol"
 
-	"github.com/golang/protobuf/proto"
+	protobuf "github.com/golang/protobuf/proto"
 )
 
 //TODO: IF YOU ARE WORKING ON A FUCKING 1K+ LINE FILE. STOP AND BREAK THAT SHIT UP, good place to start? Look at your variety of structs, those can each be isolated into thier own file so all the functions in that file relate to that fucking struct. Its like a model in rails, and it makes code actually manageable by other developers and saves EVERYONE time and lets us contribute in meaningful ways without wasting anyones time
@@ -32,7 +32,7 @@ type VoiceBroadcast struct {
 
 func (server *Server) handleCryptSetup(client *Client, message *Message) {
 	cryptSetup := &protocol.CryptSetup{}
-	err := proto.Unmarshal(message.buffer, cryptSetup)
+	err := protobuf.Unmarshal(message.buffer, cryptSetup)
 	if err != nil {
 		client.Panic(err)
 		return
@@ -69,7 +69,7 @@ func (server *Server) handleCryptSetup(client *Client, message *Message) {
 // TODO: Not very DRY, lots of room for improvement ehre
 func (server *Server) handlePingMessage(client *Client, message *Message) {
 	ping := &protocol.Ping{}
-	err := proto.Unmarshal(message.buffer, ping)
+	err := protobuf.Unmarshal(message.buffer, ping)
 	if err != nil {
 		client.Panic(err)
 		return
@@ -110,16 +110,16 @@ func (server *Server) handlePingMessage(client *Client, message *Message) {
 
 	client.sendMessage(&protocol.Ping{
 		Timestamp: ping.Timestamp,
-		Good:      proto.Uint32(uint32(client.crypt.Good)),
-		Late:      proto.Uint32(uint32(client.crypt.Late)),
-		Lost:      proto.Uint32(uint32(client.crypt.Lost)),
-		Resync:    proto.Uint32(uint32(client.crypt.Resync)),
+		Good:      protobuf.Uint32(uint32(client.crypt.Good)),
+		Late:      protobuf.Uint32(uint32(client.crypt.Late)),
+		Lost:      protobuf.Uint32(uint32(client.crypt.Lost)),
+		Resync:    protobuf.Uint32(uint32(client.crypt.Resync)),
 	})
 }
 
 func (server *Server) handleChannelRemoveMessage(client *Client, message *Message) {
 	channelRemove := &protocol.ChannelRemove{}
-	err := proto.Unmarshal(message.buffer, channelRemove)
+	err := protobuf.Unmarshal(message.buffer, channelRemove)
 	if err != nil {
 		client.Panic(err)
 		return
@@ -153,7 +153,7 @@ func (server *Server) handleChannelRemoveMessage(client *Client, message *Messag
 // Handle channel state change.
 func (server *Server) handleChannelStateMessage(client *Client, message *Message) {
 	channelState := &protocol.ChannelState{}
-	err := proto.Unmarshal(message.buffer, channelState)
+	err := protobuf.Unmarshal(message.buffer, channelState)
 	if err != nil {
 		client.Panic(err)
 		return
@@ -312,7 +312,7 @@ func (server *Server) handleChannelStateMessage(client *Client, message *Message
 		//	server.ClearCaches()
 		//}
 
-		channelState.ChannelID = proto.Uint32(channel.ID)
+		channelState.ChannelID = protobuf.Uint32(channel.ID)
 
 		// Broadcast channel add
 		server.broadcastProtoMessageWithPredicate(channelState, func(client *Client) bool {
@@ -331,8 +331,8 @@ func (server *Server) handleChannelStateMessage(client *Client, message *Message
 		// If it's a temporary channel, move the creator in there.
 		if channel.IsTemporary() {
 			userState := &protocol.UserState{}
-			userState.Session = proto.Uint32(client.Session())
-			userState.ChannelID = proto.Uint32(channel.ID)
+			userState.Session = protobuf.Uint32(client.Session())
+			userState.ChannelID = protobuf.Uint32(channel.ID)
 			server.userEnterChannel(client, channel, userState)
 			server.broadcastProtoMessage(userState)
 		}
@@ -511,7 +511,7 @@ func (server *Server) handleChannelStateMessage(client *Client, message *Message
 // TODO: Appears to be overuse of pointers?
 func (server *Server) handleUserRemoveMessage(removedClient *Client, message *Message) {
 	usersRemoved := &protocol.UserRemove{}
-	err := proto.Unmarshal(message.buffer, usersRemoved)
+	err := protobuf.Unmarshal(message.buffer, usersRemoved)
 	if err != nil {
 		removedClient.Panic(err)
 		return
@@ -561,7 +561,7 @@ func (server *Server) handleUserRemoveMessage(removedClient *Client, message *Me
 	//}
 
 	// Actor is just a uint32, whats the point here??
-	//removedClient.Actor = proto.Uint32(removedClient.Session())
+	//removedClient.Actor = protobuf.Uint32(removedClient.Session())
 	if err = server.broadcastProtoMessage(removedClient); err != nil {
 		server.Panic(errors.New("Unable to broadcast UserRemove message"))
 		return
@@ -581,7 +581,7 @@ func (server *Server) handleUserRemoveMessage(removedClient *Client, message *Me
 // Handle user state changes
 func (server *Server) handleUserStateMessage(client *Client, message *Message) {
 	userState := &protocol.UserState{}
-	err := proto.Unmarshal(message.buffer, userState)
+	err := protobuf.Unmarshal(message.buffer, userState)
 	if err != nil {
 		client.Panic(err)
 		return
@@ -601,8 +601,8 @@ func (server *Server) handleUserStateMessage(client *Client, message *Message) {
 		}
 	}
 
-	userState.Session = proto.Uint32(target.Session())
-	userState.Actor = proto.Uint32(actor.Session())
+	userState.Session = protobuf.Uint32(target.Session())
+	userState.Actor = protobuf.Uint32(actor.Session())
 
 	// Does it have a channel ID?
 	if userState.ChannelID != nil {
@@ -631,7 +631,7 @@ func (server *Server) handleUserStateMessage(client *Client, message *Message) {
 
 		// TODO: Since its already in the server config, no need for local variable
 		// TODO: Umm why?
-		maxUsersPerChannel := server.config.MaxUsersPerChannel
+		maxUsersPerChannel := server.Config.MaxUsersPerChannel
 		// TODO just check if index exists at max value, no need to count every client
 		// TODO: Validation != 0
 		if maxUsersPerChannel != 0 && destinationChannel.clients[maxUsersPerChannel] != nil {
@@ -691,13 +691,13 @@ func (server *Server) handleUserStateMessage(client *Client, message *Message) {
 			return
 		}
 
-		userState.Comment = proto.String(filtered)
+		userState.Comment = protobuf.String(filtered)
 	}
 
 	// Texture change
 	if userState.Texture != nil {
-		// TODO: Since its already in the config, no need for local variable
-		maxImageLength := server.config.MaxImageMessageLength
+		// TODO: Since its already in the Config, no need for local variable
+		maxImageLength := server.Config.MaxImageMessageLength
 		// TODO:VALIDATE: not empty length ?? but what is being checked if the configuration value is over 0, wierd, this is why we break this out and validate its functionality with tests
 		// TODO:VALIDATE: not over max length
 		if maxImageLength > 0 && &(userState.Texture[maxImageLength+1]) != nil {
@@ -762,14 +762,13 @@ func (server *Server) handleUserStateMessage(client *Client, message *Message) {
 		//} else {
 		//	userState.Texture = nil
 		//}
-
 		broadcast = true
 	}
 
 	if userState.SelfDeaf != nil {
 		target.SelfDeaf = *userState.SelfDeaf
 		if target.SelfDeaf {
-			userState.SelfDeaf = proto.Bool(true)
+			userState.SelfDeaf = protobuf.Bool(true)
 			target.SelfMute = true
 		}
 		broadcast = true
@@ -778,7 +777,7 @@ func (server *Server) handleUserStateMessage(client *Client, message *Message) {
 	if userState.SelfMute != nil {
 		target.SelfMute = *userState.SelfMute
 		if !target.SelfMute {
-			userState.SelfDeaf = proto.Bool(false)
+			userState.SelfDeaf = protobuf.Bool(false)
 			target.SelfDeaf = false
 		}
 	}
@@ -811,13 +810,13 @@ func (server *Server) handleUserStateMessage(client *Client, message *Message) {
 		if userState.Deaf != nil {
 			target.Deaf = *userState.Deaf
 			if target.Deaf {
-				userState.Mute = proto.Bool(true)
+				userState.Mute = protobuf.Bool(true)
 			}
 		}
 		if userState.Mute != nil {
 			target.Mute = *userState.Mute
 			if !target.Mute {
-				userState.Deaf = proto.Bool(false)
+				userState.Deaf = protobuf.Bool(false)
 				target.Deaf = false
 			}
 		}
@@ -837,9 +836,9 @@ func (server *Server) handleUserStateMessage(client *Client, message *Message) {
 		textMessage.TreeID = append(textMessage.TreeID, uint32(0))
 		if target.Recording {
 			// TODO: Should be bodynot message if the object is called message, or content or payload or data
-			textMessage.Message = proto.String(fmt.Sprintf("User '%s' started recording", target.ShownName()))
+			textMessage.Message = protobuf.String(fmt.Sprintf("User '%s' started recording", target.ShownName()))
 		} else {
-			textMessage.Message = proto.String(fmt.Sprintf("User '%s' stopped recording", target.ShownName()))
+			textMessage.Message = protobuf.String(fmt.Sprintf("User '%s' stopped recording", target.ShownName()))
 		}
 
 		server.broadcastProtoMessageWithPredicate(textMessage, func(client *Client) bool {
@@ -857,7 +856,7 @@ func (server *Server) handleUserStateMessage(client *Client, message *Message) {
 			//client.Printf("Unable to register: %v", err)
 			userState.UserID = nil
 		} else {
-			userState.UserID = proto.Uint32(uid)
+			userState.UserID = protobuf.Uint32(uid)
 			client.user = server.Users[uid]
 			userRegistrationChanged = true
 		}
@@ -945,7 +944,7 @@ func (server *Server) handleUserStateMessage(client *Client, message *Message) {
 
 func (server *Server) handleBanListMessage(client *Client, message *Message) {
 	banList := &protocol.BanList{}
-	err := proto.Unmarshal(message.buffer, banList)
+	err := protobuf.Unmarshal(message.buffer, banList)
 	if err != nil {
 		client.Panic(err)
 		return
@@ -968,14 +967,14 @@ func (server *Server) handleBanListMessage(client *Client, message *Message) {
 		//for _, ban := range server.Bans {
 		//	entry := &protocol.BanList_BanEntry{}
 		//	entry.Address = ban.IPAddress
-		//	entry.Mask = proto.Uint32(ban.Mask)
-		//	entry.Name = proto.String(ban.Username)
-		//	entry.Hash = proto.String(ban.CertificateHash)
-		//	entry.Reason = proto.String(ban.Reason)
-		//	entry.Start = proto.String(ban.ISOStartDate())
+		//	entry.Mask = protobuf.Uint32(ban.Mask)
+		//	entry.Name = protobuf.String(ban.Username)
+		//	entry.Hash = protobuf.String(ban.CertificateHash)
+		//	entry.Reason = protobuf.String(ban.Reason)
+		//	entry.Start = protobuf.String(ban.ISOStartDate())
 		//	// TODO: We may lose duration precision by converting it Uint32 from Uint64
-		//	//entry.Duration = proto.Uint64(ban.Duration)
-		//	entry.Duration = proto.Int32(ban.Duration)
+		//	//entry.Duration = protobuf.Uint64(ban.Duration)
+		//	entry.Duration = protobuf.Int32(ban.Duration)
 		//	banList.Bans = append(banList.Bans, entry)
 		//}
 		//if err := client.sendMessage(banList); err != nil {
@@ -1022,7 +1021,7 @@ func (server *Server) handleBanListMessage(client *Client, message *Message) {
 // Broadcast text messages
 func (server *Server) handleTextMessage(client *Client, message *Message) {
 	textMessage := &protocol.TextMessage{}
-	err := proto.Unmarshal(message.buffer, textMessage)
+	err := protobuf.Unmarshal(message.buffer, textMessage)
 	if err != nil {
 		client.Panic(err)
 		return
@@ -1040,7 +1039,7 @@ func (server *Server) handleTextMessage(client *Client, message *Message) {
 	}
 
 	// TODO: Message has attribute message? No it has attribute body, content, data ...
-	textMessage.Message = proto.String(filtered)
+	textMessage.Message = protobuf.String(filtered)
 
 	clients := make(map[uint32]*Client)
 
@@ -1091,7 +1090,7 @@ func (server *Server) handleTextMessage(client *Client, message *Message) {
 
 	for _, target := range clients {
 		target.sendMessage(&protocol.TextMessage{
-			Actor:   proto.Uint32(client.Session()),
+			Actor:   protobuf.Uint32(client.Session()),
 			Message: textMessage.Message,
 		})
 	}
@@ -1100,7 +1099,7 @@ func (server *Server) handleTextMessage(client *Client, message *Message) {
 // ACL set/query
 func (server *Server) handleAclMessage(client *Client, message *Message) {
 	acl := &protocol.ACL{}
-	err := proto.Unmarshal(message.buffer, acl)
+	err := protobuf.Unmarshal(message.buffer, acl)
 	if err != nil {
 		client.Panic(err)
 		return
@@ -1129,7 +1128,7 @@ func (server *Server) handleAclMessage(client *Client, message *Message) {
 	// TODO: Ughh just comment all this bullshit out until I can fix the structure shit
 	// Query the current ACL state for the channel
 	//if Query != nil && *Query != false {
-	//	reply.InheritACLs = proto.Bool(channel.ACL.InheritACL)
+	//	reply.InheritACLs = protobuf.Bool(channel.ACL.InheritACL)
 	//	// Walk the channel tree to get all relevant channels.
 	//	// (Stop if we reach a channel that doesn't have the InheritACL flag set)
 	//	// TODO: no, thats not necessary
@@ -1155,17 +1154,17 @@ func (server *Server) handleAclMessage(client *Client, message *Message) {
 	//			if childChannel == channel || childChannel.ApplySubs {
 	//				channelACL := &protocol.ACL_ChanACL{}
 	//				// TODO: lol no
-	//				channelACL.Inherited = proto.Bool(channel != channel)
-	//				channelACL.ApplyHere = proto.Bool(childChannel.ApplyHere)
-	//				channelACL.ApplySubs = proto.Bool(childChannel.ApplySubs)
+	//				channelACL.Inherited = protobuf.Bool(channel != channel)
+	//				channelACL.ApplyHere = protobuf.Bool(childChannel.ApplyHere)
+	//				channelACL.ApplySubs = protobuf.Bool(childChannel.ApplySubs)
 	//				if childChannel.UserID >= 0 {
 	//					channelACL.UserID = childChannel.UserID
 	//					users[childChannel.UserID] = true
 	//				} else {
-	//					channelACL.Group = proto.String(childChannel.Group)
+	//					channelACL.Group = protobuf.String(childChannel.Group)
 	//				}
-	//				channelACL.Grant = proto.Uint32(uint32(childChannel.Allow))
-	//				channelACL.Deny = proto.Uint32(uint32(childChannel.Deny))
+	//				channelACL.Grant = protobuf.Uint32(uint32(childChannel.Allow))
+	//				channelACL.Deny = protobuf.Uint32(uint32(childChannel.Deny))
 	//				reply.ACLs = append(reply.ACLs, channelACL)
 	//			}
 	//		}
@@ -1195,19 +1194,19 @@ func (server *Server) handleAclMessage(client *Client, message *Message) {
 	//		}
 
 	//		protocolGroup := &protocol.ACL_ChanGroup{}
-	//		protocolGroup.Name = proto.String(groupName)
+	//		protocolGroup.Name = protobuf.String(groupName)
 
-	//		protocolGroup.Inherit = proto.Bool(true)
+	//		protocolGroup.Inherit = protobuf.Bool(true)
 	//		if hasGroup {
-	//			protocolGroup.Inherit = proto.Bool(group.Inherit)
+	//			protocolGroup.Inherit = protobuf.Bool(group.Inherit)
 	//		}
 
-	//		protocolGroup.Inheritable = proto.Bool(true)
+	//		protocolGroup.Inheritable = protobuf.Bool(true)
 	//		if hasGroup {
-	//			protocolGroup.Inheritable = proto.Bool(group.Inheritable)
+	//			protocolGroup.Inheritable = protobuf.Bool(group.Inheritable)
 	//		}
 
-	//		protocolGroup.Inherited = proto.Bool(hasParentGroup && parentGroup.Inheritable)
+	//		protocolGroup.Inherited = protobuf.Bool(hasParentGroup && parentGroup.Inheritable)
 
 	//		// Add the set of user ids that this group affects to the user map.
 	//		// This is used later on in this function to send the client a QueryUsers
@@ -1341,7 +1340,7 @@ func (server *Server) handleAclMessage(client *Client, message *Message) {
 // User query
 func (server *Server) handleQueryUsers(client *Client, message *Message) {
 	query := &protocol.QueryUsers{}
-	err := proto.Unmarshal(message.buffer, query)
+	err := protobuf.Unmarshal(message.buffer, query)
 	if err != nil {
 		client.Panic(err)
 		return
@@ -1379,7 +1378,7 @@ func (server *Server) handleQueryUsers(client *Client, message *Message) {
 // user right clicks a user and selects 'User Information'.
 func (server *Server) handleUserStatsMessage(client *Client, message *Message) {
 	stats := &protocol.UserStats{}
-	err := proto.Unmarshal(message.buffer, stats)
+	err := protobuf.Unmarshal(message.buffer, stats)
 	if err != nil {
 		client.Panic(err)
 		return
@@ -1422,7 +1421,7 @@ func (server *Server) handleUserStatsMessage(client *Client, message *Message) {
 	details = (stats.StatsOnly != nil && *stats.StatsOnly == true)
 
 	stats.Reset()
-	stats.Session = proto.Uint32(target.Session())
+	stats.Session = protobuf.Uint32(target.Session())
 
 	if details {
 		if tlsConnection := target.connection.(*tls.Conn); tlsConnection != nil {
@@ -1430,7 +1429,7 @@ func (server *Server) handleUserStatsMessage(client *Client, message *Message) {
 			for count := len(state.PeerCertificates) - 1; count >= 0; count-- {
 				stats.Certificates = append(stats.Certificates, state.PeerCertificates[count].Raw)
 			}
-			stats.StrongCertificate = proto.Bool(target.IsVerified())
+			stats.StrongCertificate = protobuf.Bool(target.IsVerified())
 		}
 	}
 
@@ -1438,45 +1437,45 @@ func (server *Server) handleUserStatsMessage(client *Client, message *Message) {
 	// Look for patterns, and extrapolate!
 	if local {
 		fromClient := &protocol.UserStats_Stats{}
-		fromClient.Good = proto.Uint32(target.crypt.Good)
-		fromClient.Late = proto.Uint32(target.crypt.Late)
-		fromClient.Lost = proto.Uint32(target.crypt.Lost)
-		fromClient.Resync = proto.Uint32(target.crypt.Resync)
+		fromClient.Good = protobuf.Uint32(target.crypt.Good)
+		fromClient.Late = protobuf.Uint32(target.crypt.Late)
+		fromClient.Lost = protobuf.Uint32(target.crypt.Lost)
+		fromClient.Resync = protobuf.Uint32(target.crypt.Resync)
 		stats.FromClient = fromClient
 
 		fromServer := &protocol.UserStats_Stats{}
-		fromServer.Good = proto.Uint32(target.crypt.RemoteGood)
-		fromServer.Late = proto.Uint32(target.crypt.RemoteLate)
-		fromServer.Lost = proto.Uint32(target.crypt.RemoteLost)
-		fromServer.Resync = proto.Uint32(target.crypt.RemoteResync)
+		fromServer.Good = protobuf.Uint32(target.crypt.RemoteGood)
+		fromServer.Late = protobuf.Uint32(target.crypt.RemoteLate)
+		fromServer.Lost = protobuf.Uint32(target.crypt.RemoteLost)
+		fromServer.Resync = protobuf.Uint32(target.crypt.RemoteResync)
 		stats.FromServer = fromServer
 	}
 
-	stats.UdpPackets = proto.Uint32(target.UdpPackets)
-	stats.TcpPackets = proto.Uint32(target.TcpPackets)
-	stats.UdpPingAvg = proto.Float32(target.UdpPingAvg)
-	stats.UdpPingVar = proto.Float32(target.UdpPingVar)
-	stats.TcpPingAvg = proto.Float32(target.TcpPingAvg)
-	stats.TcpPingVar = proto.Float32(target.TcpPingVar)
+	stats.UdpPackets = protobuf.Uint32(target.UdpPackets)
+	stats.TcpPackets = protobuf.Uint32(target.TcpPackets)
+	stats.UdpPingAvg = protobuf.Float32(target.UdpPingAvg)
+	stats.UdpPingVar = protobuf.Float32(target.UdpPingVar)
+	stats.TcpPingAvg = protobuf.Float32(target.TcpPingAvg)
+	stats.TcpPingVar = protobuf.Float32(target.TcpPingVar)
 
 	if details {
 		version := &protocol.Version{}
-		version.Version = proto.Uint32(target.Version)
+		version.Version = protobuf.Uint32(target.Version)
 		// TODO: Why count more than 0 if we are just checking if its 0. This function eats so much extra resources
 		if len(target.ClientName) > 0 {
-			version.Release = proto.String(target.ClientName)
+			version.Release = protobuf.String(target.ClientName)
 		}
 		// TODO: Why count more than 0 if we are just checking if its 0. This function eats so much extra resources
 		if len(target.OSName) > 0 {
-			version.Os = proto.String(target.OSName)
+			version.Os = protobuf.String(target.OSName)
 			// TODO: Why count more than 0 if we are just checking if its 0. This function eats so much extra resources
 			if len(target.OSVersion) > 0 {
-				version.OsVersion = proto.String(target.OSVersion)
+				version.OsVersion = protobuf.String(target.OSVersion)
 			}
 		}
 		stats.Version = version
 		stats.CeltVersions = target.codecs
-		stats.Opus = proto.Bool(target.opus)
+		stats.Opus = protobuf.Bool(target.opus)
 		stats.Address = target.tcpAddr.IP
 	}
 
@@ -1493,7 +1492,7 @@ func (server *Server) handleUserStatsMessage(client *Client, message *Message) {
 // TODO: DO these have to be pointers? Should they be?
 func (server *Server) handleVoiceTarget(client *Client, message *Message) {
 	voiceTarget := &protocol.VoiceTarget{}
-	err := proto.Unmarshal(message.buffer, voiceTarget)
+	err := protobuf.Unmarshal(message.buffer, voiceTarget)
 	if err != nil {
 		client.Panic(err)
 		return
@@ -1550,7 +1549,7 @@ func (server *Server) handleVoiceTarget(client *Client, message *Message) {
 // Permission query
 func (server *Server) handlePermissionQuery(client *Client, message *Message) {
 	query := &protocol.PermissionQuery{}
-	err := proto.Unmarshal(message.buffer, query)
+	err := protobuf.Unmarshal(message.buffer, query)
 	if err != nil {
 		client.Panic(err)
 		return
@@ -1568,7 +1567,7 @@ func (server *Server) handlePermissionQuery(client *Client, message *Message) {
 // Request big blobs from the server
 func (server *Server) handleRequestBlob(client *Client, message *Message) {
 	requestBlob := &protocol.RequestBlob{}
-	err := proto.Unmarshal(message.buffer, requestBlob)
+	err := protobuf.Unmarshal(message.buffer, requestBlob)
 	if err != nil {
 		client.Panic(err)
 		return
@@ -1594,7 +1593,7 @@ func (server *Server) handleRequestBlob(client *Client, message *Message) {
 					//	return
 					//}
 					//userState.Reset()
-					//userState.Session = proto.Uint32(uint32(target.Session()))
+					//userState.Session = protobuf.Uint32(uint32(target.Session()))
 					//// TODO: What is a texture????? BETTER NAMES
 					//userState.Texture = buffer
 					//if err := client.sendMessage(userState); err != nil {
@@ -1625,8 +1624,8 @@ func (server *Server) handleRequestBlob(client *Client, message *Message) {
 					//	return
 					//}
 					//userState.Reset()
-					//userState.Session = proto.Uint32(uint32(target.Session()))
-					//userState.Comment = proto.String(string(buffer))
+					//userState.Session = protobuf.Uint32(uint32(target.Session()))
+					//userState.Comment = protobuf.String(string(buffer))
 					//if err := client.sendMessage(userState); err != nil {
 					//	client.Panic(err)
 					//	return
@@ -1651,8 +1650,8 @@ func (server *Server) handleRequestBlob(client *Client, message *Message) {
 					//	return
 					//}
 					//// TODO: you should be asking yourself, if you are doing a conversion everytime you use a variable, is there something majorly wrong? the answer is yes
-					//channelState.ChannelID = proto.Uint32(channel.ID)
-					//channelState.Description = proto.String(string(buffer))
+					//channelState.ChannelID = protobuf.Uint32(channel.ID)
+					//channelState.Description = protobuf.String(string(buffer))
 					//if err := client.sendMessage(channelState); err != nil {
 					//	client.Panic(err)
 					//	return
@@ -1667,7 +1666,7 @@ func (server *Server) handleRequestBlob(client *Client, message *Message) {
 // TODO: userList and userlist, BE CONSISTENT!
 func (server *Server) handleUserList(client *Client, message *Message) {
 	userList := &protocol.UserList{}
-	err := proto.Unmarshal(message.buffer, userList)
+	err := protobuf.Unmarshal(message.buffer, userList)
 	if err != nil {
 		client.Panic(err)
 		return
@@ -1692,8 +1691,8 @@ func (server *Server) handleUserList(client *Client, message *Message) {
 			}
 			// TODO: Isn't server users? why store it in this serpate list that makes it unwieldy and confusing?
 			userList.Users = append(userList.Users, &protocol.UserList_User{
-				UserID: proto.Uint32(uid),
-				Name:   proto.String(user.Name),
+				UserID: protobuf.Uint32(uid),
+				Name:   protobuf.String(user.Name),
 			})
 		}
 		if err := client.sendMessage(userList); err != nil {

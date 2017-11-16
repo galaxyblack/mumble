@@ -14,7 +14,7 @@ import (
 
 	"lib/mumble/protocol"
 
-	"github.com/golang/protobuf/proto"
+	protobuf "github.com/golang/protobuf/proto"
 )
 
 // A client connection
@@ -28,7 +28,6 @@ type Client struct {
 	//logForwarder *LogForwarder
 
 	// Connection-related
-
 	tcpAddr    *net.TCPAddr
 	udpAddr    *net.UDPAddr
 	connection net.Conn
@@ -238,7 +237,7 @@ func (client *Client) RejectAuth(rejectType protocol.Reject_RejectType, reason s
 	var reasonString *string = nil
 	// TODO: Validation, so new function, and checking empty doesnt require counting all chars in reason
 	if len(reason) > 0 {
-		reasonString = proto.String(reason)
+		reasonString = protobuf.String(reason)
 	}
 
 	client.sendMessage(&protocol.Reject{
@@ -296,7 +295,7 @@ func (client *Client) sendPermissionDeniedTypeUser(denyType protocol.PermissionD
 		Type: denyType.Enum(),
 	}
 	if user != nil {
-		permissionDenied.Session = proto.Uint32(user.Session())
+		permissionDenied.Session = protobuf.Uint32(user.Session())
 	}
 	err := client.sendMessage(permissionDenied)
 	if err != nil {
@@ -308,9 +307,9 @@ func (client *Client) sendPermissionDeniedTypeUser(denyType protocol.PermissionD
 // Send permission denied by who, what, where
 func (client *Client) sendPermissionDenied(who *Client, where *Channel, what uint32) {
 	permissionDenied := &protocol.PermissionDenied{
-		Permission: proto.Uint32(what),
-		ChannelID:  proto.Uint32(where.ID),
-		Session:    proto.Uint32(who.Session()),
+		Permission: protobuf.Uint32(what),
+		ChannelID:  protobuf.Uint32(where.ID),
+		Session:    protobuf.Uint32(who.Session()),
 		Type:       protocol.PermissionDenied_Permission.Enum(),
 	}
 	err := client.sendMessage(permissionDenied)
@@ -326,7 +325,7 @@ func (client *Client) sendPermissionDeniedFallback(denyType protocol.PermissionD
 		Type: denyType.Enum(),
 	}
 	if client.Version < version {
-		permissionDenied.Reason = proto.String(text)
+		permissionDenied.Reason = protobuf.String(text)
 	}
 	err := client.sendMessage(permissionDenied)
 	if err != nil {
@@ -444,11 +443,11 @@ func (client *Client) sendMessage(message interface{}) error {
 	if kind == protocol.MessageUDPTunnel {
 		messageData = message.([]byte)
 	} else {
-		protoMessage, ok := (message).(proto.Message)
+		protoMessage, ok := (message).(protobuf.Message)
 		if !ok {
-			return errors.New("client: exepcted a proto.Message")
+			return errors.New("client: exepcted a protobuf.Message")
 		}
-		messageData, err = proto.Marshal(protoMessage)
+		messageData, err = protobuf.Marshal(protoMessage)
 		if err != nil {
 			return err
 		}
@@ -536,14 +535,14 @@ func (client *Client) tlsReceiveLoop() {
 		if client.state == StateClientConnected {
 			version := &protocol.Version{
 				// TODO: What was the point of making a version const when we are going to hardcode it everywhere?
-				Version: proto.Uint32(0x10205),
+				Version: protobuf.Uint32(0x10205),
 				// TODO: Okay again, why are we not using a const?
-				Release:     proto.String("Mumble Server"),
+				Release:     protobuf.String("Mumble Server"),
 				CryptoModes: SupportedModes(),
 			}
-			if client.server.config.BoolValue("SendOSInfo") {
-				version.Os = proto.String(runtime.GOOS)
-				version.OsVersion = proto.String("(Unknown version)")
+			if client.server.Config.SendOSInfo {
+				version.Os = protobuf.String(runtime.GOOS)
+				version.OsVersion = protobuf.String("(Unknown version)")
 			}
 			client.sendMessage(version)
 			client.state = StateServerSentVersion
@@ -560,7 +559,7 @@ func (client *Client) tlsReceiveLoop() {
 			}
 
 			version := &protocol.Version{}
-			err = proto.Unmarshal(message.buffer, version)
+			err = protobuf.Unmarshal(message.buffer, version)
 			if err != nil {
 				client.Panic(err)
 				return
@@ -621,11 +620,11 @@ func (client *Client) sendChannelList() {
 
 func (client *Client) sendChannelTree(channel *Channel) {
 	channelState := &protocol.ChannelState{
-		ChannelID: proto.Uint32(channel.ID),
-		Name:      proto.String(channel.Name),
+		ChannelID: protobuf.Uint32(channel.ID),
+		Name:      protobuf.String(channel.Name),
 	}
 	if channel.parent != nil {
-		channelState.Parent = proto.Uint32(channel.parent.ID)
+		channelState.Parent = protobuf.Uint32(channel.parent.ID)
 	}
 
 	if channel.HasDescription() {
@@ -637,15 +636,15 @@ func (client *Client) sendChannelTree(channel *Channel) {
 			//if err != nil {
 			//	panic("Blobstore error.")
 			//}
-			//channelState.Description = proto.String(string(buffer))
+			//channelState.Description = protobuf.String(string(buffer))
 		}
 	}
 
 	if channel.IsTemporary() {
-		channelState.Temporary = proto.Bool(true)
+		channelState.Temporary = protobuf.Bool(true)
 	}
 
-	channelState.Position = proto.Int32(int32(channel.Position))
+	channelState.Position = protobuf.Int32(int32(channel.Position))
 
 	links := []uint32{}
 	for cid, _ := range channel.Links {

@@ -25,27 +25,27 @@ type Register struct {
 	Location string   `xml:"location"`
 }
 
-// TODO: This should be changed, not hardcoded (read from config)
+// TODO: This should be changed, not hardcoded (read from Config)
 const registerURL = "https://mumble.hive.no/register.cgi"
 
 // Determines whether a server is public by checking whether the
-// config values required for public registration are set.
+// Config values required for public registration are set.
 //
 // This function is used to determine whether or not to periodically
 // contact the master server list and update this server's metadata.
 func (server *Server) IsPublic() bool {
 	// TODO: Just return the if statement instead of checking then creating a false to pass through
 	// TODO: don't count entire strings if you just need to check the value of a single index
-	if len(server.config.StringValue("RegisterName")) == 0 {
+	if len(server.Config.StringValue("RegisterName")) == 0 {
 		return false
 	}
-	if len(server.config.StringValue("RegisterHost")) == 0 {
+	if len(server.Config.StringValue("RegisterHost")) == 0 {
 		return false
 	}
-	if len(server.config.StringValue("RegisterPassword")) == 0 {
+	if len(server.Config.StringValue("RegisterPassword")) == 0 {
 		return false
 	}
-	if len(server.config.StringValue("RegisterWebUrl")) == 0 {
+	if len(server.Config.StringValue("RegisterWebURL")) == 0 {
 		return false
 	}
 	return true
@@ -78,11 +78,11 @@ func (server *Server) RegisterPublicServer() {
 
 	// Render registration XML template
 	registrationData := Register{
-		Name:     server.config.StringValue("RegisterName"),
-		Host:     server.config.StringValue("RegisterHost"),
-		Password: server.config.StringValue("RegisterPassword"),
-		URL:      server.config.StringValue("RegisterWebURL"),
-		Location: server.config.StringValue("RegisterLocation"),
+		Name:     server.Config.StringValue("RegisterName"),
+		Host:     server.Config.StringValue("RegisterHost"),
+		Password: server.Config.StringValue("RegisterPassword"),
+		URL:      server.Config.StringValue("RegisterWebURL"),
+		Location: server.Config.StringValue("RegisterLocation"),
 		Port:     server.CurrentPort(),
 		Digest:   digest,
 		Users:    len(server.clients),
@@ -90,7 +90,7 @@ func (server *Server) RegisterPublicServer() {
 		// TODO: We have this loaded into a version file and hardcoded, so... lets use it
 		Version: "0.1.0",
 		// TODO: Pull this from a build config file
-		Release: "Mumble Git",
+		Release: "Mumble Alpha",
 	}
 	buffer := bytes.NewBuffer(nil)
 	err := xml.NewEncoder(buffer).Encode(registrationData)

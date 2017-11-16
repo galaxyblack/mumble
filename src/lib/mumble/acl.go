@@ -1,7 +1,7 @@
 package mumble
 
 import (
-	"github.com/golang/protobuf/proto"
+	protobuf "github.com/golang/protobuf/proto"
 )
 
 // ACL - Access control list
@@ -198,7 +198,7 @@ func (acl *ACL) HasPermission(ctx *Context, user User, permission Permission) bo
 
 func (acl *ACL) Reset() { acl = &ACL{} }
 
-func (acl *ACL) String() string { return proto.CompactTextString(acl) }
+func (acl *ACL) String() string { return protobuf.CompactTextString(acl) }
 func (acl *ACL) ProtoMessage()  {}
 
 func (acl *ACL) GetUserID() uint32 {

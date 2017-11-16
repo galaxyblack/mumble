@@ -20,12 +20,13 @@ import (
 
 	"lib/mumble/protocol"
 
-	"github.com/golang/protobuf/proto"
+	protobuf "github.com/golang/protobuf/proto"
+	db "github.com/tidwall/buntdb"
 )
 
 // The default port a Murmur server listens on
 // TODO: These should not be constants :( this should be defined by the user or have a default value :( :( seriously this kind of programming makes me sad ;_;
-// Like a default server struct with these objects loaded as defaults that are overriden by config then environmental variable then flags args.
+// Like a default server struct with these objects loaded as defaults that are overriden by Config then environmental variable then flags args.
 // Otherwise we are just wasting memory if anything is NOT default :(
 const (
 	DefaultPort          = 64738
@@ -47,9 +48,14 @@ type KeyValuePair struct {
 }
 
 // A Mumble (Murmur) server instance
-// TODO: Exactly its a server instance, so why are we not storing server configuration values here!!!!!
+// TODO: Exactly its a server instance, so why are we not storing server Config values here!!!!!
 // if done correclty, this can support clusters
 type Server struct {
+	Name string
+	Version
+	Config
+	DB *db.DB
+
 	ID uint32
 
 	// TODO: Do MORE cleanup on these names, follow Go convention, and make it readable so, we dont have to have inside knowledge to understand our server struct, pretty important data type one would hope
@@ -63,16 +69,13 @@ type Server struct {
 
 	incoming       chan *Message
 	voiceBroadcast chan *VoiceBroadcast
-	configUpdate   chan *KeyValuePair
+	ConfigUpdate   chan *KeyValuePair
 	// TODO: What? Can't be needed
 	temporaryRemove chan *Channel
 
 	// Signals to the server that a client has been successfully
 	// authenticated.
 	clientAuthenticated chan *Client
-
-	// Server configuration
-	config *Config
 
 	// Clients
 	clients map[uint32]*Client
@@ -125,7 +128,7 @@ type Server struct {
 }
 
 func (server *Server) Reset()         { *server = Server{} }
-func (server *Server) String() string { return proto.CompactTextString(server) }
+func (server *Server) String() string { return protobuf.CompactTextString(server) }
 func (server *Server) ProtoMessage()  {}
 
 func (server *Server) GetBanList() protocol.BanList {
@@ -158,16 +161,16 @@ func (server *Server) Panic(err error) {
 
 // Allocate a new Murmur instance
 // TODO: Every other function uses the local name server, why is this using s? Consistency is always best practice
-// TODO: What? Why are we passing the ID? Generate a god damn ID, don't have us pass it, get all other shit from config, you want a server name? CONFIG!
+// TODO: What? Why are we passing the ID? Generate a god damn ID, don't have us pass it, get all other shit from Config, you want a server name? CONFIG!
 // TODO: Also maybe break up into new and init? Ruby had some good ideas with that
 func NewServer(id uint32) (server Server, err error) {
 	// TODO: There are cleaner ways to initialize structs
 	server.ID = id
 
-	// TODO: What the fuck? No pull this directly from JSON. Rule is: Runtime configuration > Environmental Variables > Config > Default values.
-	// this is how you make software that is not annoying as fuck to use for people you know. like not shitty, works without any config, but it can generate a blank from default if nothing is defined and easily overridden in the expected way.
+	// TODO: What the fuck? No pull this directly from JSON. Rule is: Runtime Configuration > Environmental Variables > Config > Default values.
+	// this is how you make software that is not annoying as fuck to use for people you know. like not shitty, works without any Config, but it can generate a blank from default if nothing is defined and easily overridden in the expected way.
 	//emptyConfig := make(map[string]string)
-	//server.config.configMap = NewConfig(emptyConfig)
+	//server.Config.ConfigMap = NewConfig(emptyConfig)
 
 	// TODO: Whats the point of the SQL db if we arent going to put the users there? Lets move this to key/value, this is insane
 	// BoltDB? Fast and on-disk like the freeze shit or completely in memory database that has better way of organizing than just maps/hashes  AT THE VERY LEAST, LETS NOT USE STRING FUCKING IDS FOR FUCKS SAKE! AND LETS USE PREFIX radix based lookup? is it worth it to use a pure go implementation and cut out more code?
@@ -214,14 +217,14 @@ func (server Server) SetSuperUserPassword(password string) {
 	// TODO: Also don't use sha1, come on, its 2017
 	key := "SuperUserPassword"
 	value := "sha1$" + salt + "$" + digest
-	server.config.Set(key, value)
-	server.configUpdate <- &KeyValuePair{Key: key, Value: value}
+	server.Config.Set(key, value)
+	server.ConfigUpdate <- &KeyValuePair{Key: key, Value: value}
 }
 
 // Check whether password matches the set SuperUser password.
 // TODO: Add shared secrets, ephemeral keying, OTP, 2nd-factor, etc
 func (server Server) CheckSuperUserPassword(password string) bool {
-	parts := strings.Split(server.config.StringValue("SuperUserPassword"), "$")
+	parts := strings.Split(server.Config.StringValue("SuperUserPassword"), "$")
 	if len(parts) != 3 {
 		return false
 	}
@@ -360,7 +363,7 @@ func (server Server) RemoveClient(client *Client, kicked bool) {
 	// TODO: Why is kicked check not its own function? Why is it a local variable and not a attribute of the user?
 	if !kicked && client.state > StateClientAuthenticated {
 		err := server.broadcastProtoMessage(&protocol.UserRemove{
-			Session: proto.Uint32(client.Session()),
+			Session: protobuf.Uint32(client.Session()),
 		})
 		if err != nil {
 			server.Panic(errors.New("Unable to broadcast UserRemove message for disconnected client."))
@@ -446,8 +449,8 @@ func (server Server) handlerLoop() {
 		// server info.
 		case client := <-server.clientAuthenticated:
 			server.finishAuthenticate(client)
-		// Disk freeze config update
-		case kvp := <-server.configUpdate:
+		// Disk freeze Config update
+		case kvp := <-server.ConfigUpdate:
 			if !kvp.Reset {
 				//server.UpdateConfig(kvp.Key, kvp.Value)
 			} else {
@@ -488,7 +491,7 @@ func (server Server) handleAuthenticate(client *Client, message *Message) {
 	}
 
 	auth := &protocol.Authenticate{}
-	err := proto.Unmarshal(message.buffer, auth)
+	err := protobuf.Unmarshal(message.buffer, auth)
 	if err != nil {
 		client.Panic(errors.New("Unable to unmarshal Authenticate message."))
 		return
@@ -618,7 +621,7 @@ func (server Server) finishAuthenticate(client *Client) {
 		if server.Opus && !client.opus {
 			client.sendMessage(&protocol.TextMessage{
 				Session: []uint32{client.Session()},
-				Message: proto.String("<strong>WARNING:</strong> Your client doesn't support the CELT codec, you won't be able to talk to or hear most clients. Please make sure your client was built with CELT support."),
+				Message: protobuf.String("<strong>WARNING:</strong> Your client doesn't support the CELT codec, you won't be able to talk to or hear most clients. Please make sure your client was built with CELT support."),
 			})
 		}
 	}
@@ -643,17 +646,17 @@ func (server Server) finishAuthenticate(client *Client) {
 	}
 
 	userState := &protocol.UserState{
-		Session:   proto.Uint32(client.Session()),
-		Name:      proto.String(client.ShownName()),
-		ChannelID: proto.Uint32(channel.ID),
+		Session:   protobuf.Uint32(client.Session()),
+		Name:      protobuf.String(client.ShownName()),
+		ChannelID: protobuf.Uint32(channel.ID),
 	}
 
 	if client.HasCertificate() {
-		userState.Hash = proto.String(client.CertificateHash())
+		userState.Hash = protobuf.String(client.CertificateHash())
 	}
 
 	if client.IsRegistered() {
-		userState.UserID = proto.Uint32(client.UserID())
+		userState.UserID = protobuf.Uint32(client.UserID())
 		if client.user.HasTexture() {
 			// Does the client support blobs?
 			if client.Version >= 0x10203 {
@@ -678,7 +681,7 @@ func (server Server) finishAuthenticate(client *Client) {
 				//if err != nil {
 				//	server.Panic(err)
 				//}
-				//userState.Comment = proto.String(string(buffer))
+				//userState.Comment = protobuf.String(string(buffer))
 			}
 		}
 	}
@@ -692,11 +695,11 @@ func (server Server) finishAuthenticate(client *Client) {
 
 	sync := &protocol.ServerSync{}
 	// TODO: Can we have key based sessions? Making them a bit harder to iterate and allow prefix tree lookups?
-	sync.Session = proto.Uint32(client.Session())
-	sync.MaxBandwidth = proto.Uint32(server.config.MaxBandwidth)
-	sync.WelcomeText = proto.String(server.config.WelcomeText)
+	sync.Session = protobuf.Uint32(client.Session())
+	sync.MaxBandwidth = protobuf.Uint32(server.Config.MaxBandwidth)
+	sync.WelcomeText = protobuf.String(server.Config.WelcomeText)
 	if client.IsSuperUser() {
-		sync.Permissions = proto.Uint64(AllPermissions)
+		sync.Permissions = protobuf.Uint64(AllPermissions)
 	} else {
 		// fixme(mkrautz): previously we calculated the user's
 		// permissions and sent them to the client in here. This
@@ -711,9 +714,9 @@ func (server Server) finishAuthenticate(client *Client) {
 	}
 
 	err := client.sendMessage(&protocol.ServerConfig{
-		AllowHtml:          proto.Bool(server.config.AllowHTML),
-		MessageLength:      proto.Uint32(server.config.MaxTextMessageLength),
-		ImageMessageLength: proto.Uint32(server.config.MaxImageMessageLength),
+		AllowHtml:          protobuf.Bool(server.Config.AllowHTML),
+		MessageLength:      protobuf.Uint32(server.Config.MaxTextMessageLength),
+		ImageMessageLength: protobuf.Uint32(server.Config.MaxImageMessageLength),
 	})
 	if err != nil {
 		client.Panic(err)
@@ -734,7 +737,7 @@ func (server Server) updateCodecVersions(connecting *Client) {
 		opus        int
 		enableOpus  bool
 		textMessage *protocol.TextMessage = &protocol.TextMessage{
-			Message: proto.String("<strong>WARNING:</strong> Your client doesn't support the Opus codec the server is switching to, you won't be able to talk or hear anyone. Please upgrade to a client with Opus support."),
+			Message: protobuf.String("<strong>WARNING:</strong> Your client doesn't support the Opus codec the server is switching to, you won't be able to talk or hear anyone. Please upgrade to a client with Opus support."),
 		}
 	)
 
@@ -793,10 +796,10 @@ func (server Server) updateCodecVersions(connecting *Client) {
 	server.Opus = enableOpus
 
 	err := server.broadcastProtoMessage(&protocol.CodecVersion{
-		Alpha:       proto.Int32(server.AlphaCodec),
-		Beta:        proto.Int32(server.BetaCodec),
-		PreferAlpha: proto.Bool(server.PreferAlphaCodec),
-		Opus:        proto.Bool(server.Opus),
+		Alpha:       protobuf.Int32(server.AlphaCodec),
+		Beta:        protobuf.Int32(server.BetaCodec),
+		PreferAlpha: protobuf.Bool(server.PreferAlphaCodec),
+		Opus:        protobuf.Bool(server.Opus),
 	})
 	if err != nil {
 		//server.Printf("Unable to broadcast.")
@@ -833,17 +836,17 @@ func (server Server) sendUserList(client *Client) {
 		}
 
 		userState := &protocol.UserState{
-			Session:   proto.Uint32(connectedClient.Session()),
-			Name:      proto.String(connectedClient.ShownName()),
-			ChannelID: proto.Uint32(connectedClient.Channel.ID),
+			Session:   protobuf.Uint32(connectedClient.Session()),
+			Name:      protobuf.String(connectedClient.ShownName()),
+			ChannelID: protobuf.Uint32(connectedClient.Channel.ID),
 		}
 
 		if connectedClient.HasCertificate() {
-			userState.Hash = proto.String(connectedClient.CertificateHash())
+			userState.Hash = protobuf.String(connectedClient.CertificateHash())
 		}
 
 		if connectedClient.IsRegistered() {
-			userState.UserID = proto.Uint32(connectedClient.UserID())
+			userState.UserID = protobuf.Uint32(connectedClient.UserID())
 
 			if connectedClient.user.HasTexture() {
 				// Does the client support blobs?
@@ -870,35 +873,35 @@ func (server Server) sendUserList(client *Client) {
 					//if err != nil {
 					//	server.Panic(err)
 					//}
-					//userState.Comment = proto.String(string(buffer))
+					//userState.Comment = protobuf.String(string(buffer))
 				}
 			}
 		}
 
 		if connectedClient.Mute {
-			userState.Mute = proto.Bool(true)
+			userState.Mute = protobuf.Bool(true)
 		}
 		if connectedClient.Suppress {
-			userState.Suppress = proto.Bool(true)
+			userState.Suppress = protobuf.Bool(true)
 		}
 		if connectedClient.SelfMute {
-			userState.SelfMute = proto.Bool(true)
+			userState.SelfMute = protobuf.Bool(true)
 		}
 		if connectedClient.SelfDeaf {
-			userState.SelfDeaf = proto.Bool(true)
+			userState.SelfDeaf = protobuf.Bool(true)
 		}
 		if connectedClient.PrioritySpeaker {
-			userState.PrioritySpeaker = proto.Bool(true)
+			userState.PrioritySpeaker = protobuf.Bool(true)
 		}
 		if connectedClient.Recording {
-			userState.Recording = proto.Bool(true)
+			userState.Recording = protobuf.Bool(true)
 		}
 		// TODO:VALIDATE: Not empty
 		if connectedClient.PluginContext != nil || len(connectedClient.PluginContext) > 0 {
 			userState.PluginContext = connectedClient.PluginContext
 		}
 		if len(connectedClient.PluginIdentity) > 0 {
-			userState.PluginIdentity = proto.String(connectedClient.PluginIdentity)
+			userState.PluginIdentity = protobuf.String(connectedClient.PluginIdentity)
 		}
 
 		err := client.sendMessage(userState)
@@ -922,8 +925,8 @@ func (server Server) sendClientPermissions(client *Client, channel *Channel) {
 
 	//permission := Permission(NonePermission)
 	//client.sendMessage(&protocol.PermissionQuery{
-	//	ChannelID:   proto.Uint32(channel.ID),
-	//	Permissions: proto.Uint32(permission),
+	//	ChannelID:   protobuf.Uint32(channel.ID),
+	//	Permissions: protobuf.Uint32(permission),
 	//})
 }
 
@@ -1034,8 +1037,8 @@ func (server Server) udpListenLoop() {
 			_ = binary.Write(buffer, binary.BigEndian, uint32((1<<16)|(2<<8)|2))
 			_ = binary.Write(buffer, binary.BigEndian, rand)
 			_ = binary.Write(buffer, binary.BigEndian, uint32(len(server.clients)))
-			_ = binary.Write(buffer, binary.BigEndian, server.config.MaxUsers)
-			_ = binary.Write(buffer, binary.BigEndian, server.config.MaxBandwidth)
+			_ = binary.Write(buffer, binary.BigEndian, server.Config.MaxUsers)
+			_ = binary.Write(buffer, binary.BigEndian, server.Config.MaxBandwidth)
 
 			// TODO: wait wait, why are we using buffer, I thought we created readBuffer, whats the point fo that variable?
 			err = server.SendUDP(buffer.Bytes(), udpAddr)
@@ -1133,7 +1136,7 @@ func (server Server) userEnterChannel(client *Client, channel *Channel, userStat
 	canSpeak := false
 	if canSpeak == client.Suppress {
 		client.Suppress = canSpeak
-		userState.Suppress = proto.Bool(client.Suppress)
+		userState.Suppress = protobuf.Bool(client.Suppress)
 	}
 
 	server.sendClientPermissions(client, channel)
@@ -1334,9 +1337,9 @@ func (server Server) IsCertificateHashBanned(hash string) bool {
 func (server Server) FilterText(text string) (filtered string, err error) {
 	// TODO: Just use a proper filter
 	//options := &htmlfilter.Options{
-	//	StripHTML:             !server.config.AllowHTML,
-	//	MaxTextMessageLength:  server.config.MaxTextMessageLength,
-	//	MaxImageMessageLength: server.config.MaxImageMessageLength,
+	//	StripHTML:             !server.Config.AllowHTML,
+	//	MaxTextMessageLength:  server.Config.MaxTextMessageLength,
+	//	MaxImageMessageLength: server.Config.MaxImageMessageLength,
 	//}
 	//return htmlFilter.Filter(text, options)
 	return text, nil
@@ -1400,7 +1403,7 @@ func (server Server) initPerLaunchData() {
 	server.bye = make(chan bool)
 	server.incoming = make(chan *Message)
 	server.voiceBroadcast = make(chan *VoiceBroadcast)
-	server.configUpdate = make(chan *KeyValuePair)
+	server.ConfigUpdate = make(chan *KeyValuePair)
 	server.temporaryRemove = make(chan *Channel, 1)
 	server.clientAuthenticated = make(chan *Client)
 }
@@ -1415,7 +1418,7 @@ func (server Server) cleanPerLaunchData() {
 	server.bye = nil
 	server.incoming = nil
 	server.voiceBroadcast = nil
-	server.configUpdate = nil
+	server.ConfigUpdate = nil
 	server.temporaryRemove = nil
 	server.clientAuthenticated = nil
 }
@@ -1423,7 +1426,7 @@ func (server Server) cleanPerLaunchData() {
 // Returns the port the server will listen on when it is
 // started. Returns 0 on failure.
 func (server Server) Port() int {
-	port := server.config.Port
+	port := server.Config.Port
 	if port == 0 {
 		// TODO: What the hell is this? Just use the default port, why is the serverID -1 involved? Set one when defining the server not here
 		return DefaultPort + int(server.ID) - 1
@@ -1448,7 +1451,7 @@ func (server Server) CurrentPort() int {
 // it is started. This must be an IP address, either IPv4
 // or IPv6.
 func (server Server) HostAddress() string {
-	host := server.config.IPAddress
+	host := server.Config.IPAddress
 	// TODO: Don't set this here!, set it ONCE during fucking initialization, for fucks sake
 	if host == "" {
 		return "0.0.0.0"
@@ -1490,9 +1493,8 @@ func (server Server) Start() (err error) {
 	//}
 
 	// Wrap a TLS listener around the TCP connection
-	// TODO: Nooooo this is a library file, not the command! GET OUT ARGS! USE CONFIG!
-	certificateFilename := filepath.Join(server.config.DataDirectory, "cert.pem")
-	keyFilename := filepath.Join(server.config.DataDirectory, "key.pem")
+	certificateFilename := filepath.Join(server.Config.DataPath, "cert.pem")
+	keyFilename := filepath.Join(server.Config.DataPath, "key.pem")
 	certificate, err := tls.LoadX509KeyPair(certificateFilename, keyFilename)
 	if err != nil {
 		return err

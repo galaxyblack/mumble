@@ -439,7 +439,7 @@ func populateUsers(server Server, db *sql.DB) (err error) {
 
 		if UserID == 0 {
 			// TODO: We can do better, 2017, dont use sha1
-			server.config.Set("SuperUserPassword", "sha1$$"+SHA1Password)
+			server.Config.Set("SuperUserPassword", "sha1$$"+SHA1Password)
 		}
 
 		user, err := NewUser(UserID, UserName)
