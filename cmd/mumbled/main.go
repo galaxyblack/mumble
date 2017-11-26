@@ -9,7 +9,7 @@ import (
 	//"regexp"
 
 	"lib/mumble"
-	"lib/uput/valid"
+	valid "lib/uput/valid" // All validations
 
 	db "github.com/tidwall/buntdb"
 	cli "github.com/urfave/cli"
@@ -197,11 +197,16 @@ func main() {
 			//  fmt.Println("test")
 			//}
 
-			userInput, err := valid.IfString("test").IsUppercase().IsEmpty().IsValid()
-			if err != nil {
-				fmt.Println("userInput experienced an error: ", err)
+			//TODO Move this test into _test.go
+			//kCharacter := "K"
+			//kelvinSymbol := "K"
+			//fmt.Println("Compare K and K (Kelvin Symbol) using strings.Contains(string, string): ", strings.Contains(kCharacter, kelvinSymbol))
+			//string.Contains will not work with UTF8, only use contains for ASCII confirmed
+			isValid, validatedInput, errs := valid.IfString("t0").Contains("cool").IsLessThan(2).ErrorMessage("custom lessthan message").ValidationDescription("custom lessthan validation description").IsIn([]string{"test", "best", "mega"}).NoNumeric().NotEmpty().IsValid()
+			if !isValid {
+				fmt.Println("errs variable: ", errs)
 			} else {
-				fmt.Println("validated and usable userInput is:", userInput)
+				fmt.Println("validated and usable userInput is:", validatedInput)
 			}
 
 			//fmt.Println("Is it empty? ", c.String("data").IsEmpty())
